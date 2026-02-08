@@ -1,14 +1,16 @@
 """TUI Screens for mytt-scraper."""
 
+from pathlib import Path
+
 from textual.app import ComposeResult
-from textual.containers import Center, Vertical
-from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, Static
+from textual.containers import Center, Vertical, Horizontal
+from textual.screen import Screen, ModalScreen
+from textual.widgets import Button, Footer, Header, Input, Label, Static, DataTable
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
 
-__all__ = ["LoginScreen", "MainMenuScreen", "SearchScreen"]
+__all__ = ["LoginScreen", "MainMenuScreen", "SearchScreen", "UserIdInputScreen", "ResultScreen"]
 
 
 class LoginScreen(Screen):
@@ -182,17 +184,26 @@ class LoginScreen(Screen):
 
 
 class MainMenuScreen(Screen):
-    """Main menu screen with navigation to all features."""
+    """Main menu screen with navigation to all features.
+
+    Supports fetching own profile and fetching external profiles by user ID,
+    with background workers to keep the UI responsive.
+    """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("l", "logout", "Logout"),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._fetch_worker: Worker | None = None
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="menu-container"):
             yield Label("Main Menu", id="menu-title")
+            yield Static("Select an action to continue", id="menu-status")
             with Center():
                 yield Button("Fetch My Profile", id="fetch-profile", variant="primary")
             with Center():
@@ -207,24 +218,243 @@ class MainMenuScreen(Screen):
             self.notify("Not authenticated. Please login.", severity="error")
             self.app.switch_screen("login")
 
+    def _update_status(self, message: str) -> None:
+        """Update the status display.
+
+        Args:
+            message: Status message to display
+        """
+        status = self.query_one("#menu-status", Static)
+        status.update(message)
+
+    def _set_buttons_enabled(self, enabled: bool) -> None:
+        """Enable or disable all menu buttons.
+
+        Args:
+            enabled: True to enable, False to disable
+        """
+        for button_id in ["fetch-profile", "search-players", "fetch-by-id"]:
+            button = self.query_one(f"#{button_id}", Button)
+            button.disabled = not enabled
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle menu button presses."""
         button_id = event.button.id
 
         if button_id == "fetch-profile":
-            scraper = self.app.get_scraper()
-            if scraper:
-                self.notify("Fetching your profile...", severity="information")
-                # TODO: Run fetch in background worker
-            else:
-                self.notify("Not authenticated", severity="error")
+            self._start_fetch_own_profile()
         elif button_id == "search-players":
             self.app.push_screen("search")
         elif button_id == "fetch-by-id":
-            self.notify("Fetch by ID - not yet implemented", severity="warning")
+            self._show_user_id_input()
+
+    def _start_fetch_own_profile(self) -> None:
+        """Start fetching the user's own profile in a background worker."""
+        scraper = self.app.get_scraper()
+        if not scraper:
+            self.notify("Not authenticated", severity="error")
+            return
+
+        # Disable buttons during operation
+        self._set_buttons_enabled(False)
+        self._update_status("[yellow]🔄 Fetching your profile...[/]")
+
+        # Run fetch in background worker
+        self._fetch_worker = self.run_worker(
+            self._do_fetch_own_profile(scraper),
+            name="fetch_profile_worker",
+            description="Fetch own profile data",
+        )
+
+    async def _do_fetch_own_profile(self, scraper) -> dict:
+        """Background worker to fetch own profile.
+
+        Args:
+            scraper: Authenticated scraper instance
+
+        Returns:
+            Dictionary with success status and result info
+        """
+        self.app.call_from_thread(
+            self._update_status, "[yellow]🌐 Logging in and fetching data...[/]"
+        )
+
+        try:
+            # Login first
+            if not scraper.login():
+                return {"success": False, "error": "Login failed"}
+
+            self.app.call_from_thread(
+                self._update_status, "[yellow]📊 Extracting tables...[/]"
+            )
+
+            # Fetch own profile data
+            data = scraper.run_own_profile()
+
+            if data:
+                # Get list of tables that were written
+                tables_dir = scraper.tables_dir
+                tables_written = self._get_tables_written(tables_dir)
+
+                return {
+                    "success": True,
+                    "type": "own_profile",
+                    "tables_dir": str(tables_dir),
+                    "tables_written": tables_written,
+                }
+            else:
+                return {"success": False, "error": "Failed to fetch profile data"}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _show_user_id_input(self) -> None:
+        """Show the user ID input modal screen."""
+        self.app.push_screen(UserIdInputScreen(), callback=self._on_user_id_entered)
+
+    def _on_user_id_entered(self, user_id: str | None) -> None:
+        """Handle user ID input from modal.
+
+        Args:
+            user_id: The entered user ID, or None if cancelled
+        """
+        if not user_id:
+            return  # User cancelled
+
+        scraper = self.app.get_scraper()
+        if not scraper:
+            self.notify("Not authenticated", severity="error")
+            return
+
+        # Disable buttons during operation
+        self._set_buttons_enabled(False)
+        self._update_status(f"[yellow]🔄 Fetching profile for user: {user_id}...[/]")
+
+        # Run fetch in background worker
+        self._fetch_worker = self.run_worker(
+            self._do_fetch_external_profile(scraper, user_id),
+            name="fetch_external_worker",
+            description=f"Fetch external profile: {user_id}",
+        )
+
+    async def _do_fetch_external_profile(self, scraper, user_id: str) -> dict:
+        """Background worker to fetch external profile.
+
+        Args:
+            scraper: Authenticated scraper instance
+            user_id: User ID to fetch
+
+        Returns:
+            Dictionary with success status and result info
+        """
+        self.app.call_from_thread(
+            self._update_status, "[yellow]🌐 Logging in and fetching data...[/]"
+        )
+
+        try:
+            # Login first
+            if not scraper.login():
+                return {"success": False, "error": "Login failed"}
+
+            self.app.call_from_thread(
+                self._update_status, f"[yellow]📊 Fetching profile for {user_id}...[/]"
+            )
+
+            # Fetch external profile data
+            data = scraper.run_external_profile(user_id)
+
+            if data:
+                # Get list of tables that were written
+                tables_dir = scraper.tables_dir
+                tables_written = self._get_tables_written(tables_dir, prefix=f"{user_id}_")
+
+                return {
+                    "success": True,
+                    "type": "external_profile",
+                    "user_id": user_id,
+                    "tables_dir": str(tables_dir),
+                    "tables_written": tables_written,
+                }
+            else:
+                return {"success": False, "error": "Failed to fetch profile data"}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _get_tables_written(self, tables_dir: Path, prefix: str = "") -> list[str]:
+        """Get list of CSV files written to tables directory.
+
+        Args:
+            tables_dir: Directory where tables are stored
+            prefix: Optional filename prefix to filter by
+
+        Returns:
+            List of filenames
+        """
+        if not tables_dir.exists():
+            return []
+
+        files = []
+        for f in tables_dir.iterdir():
+            if f.is_file() and f.suffix == ".csv":
+                if not prefix or f.name.startswith(prefix):
+                    files.append(f.name)
+
+        return sorted(files)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker state changes for fetch operations.
+
+        Args:
+            event: Worker state change event
+        """
+        if event.worker.name not in ["fetch_profile_worker", "fetch_external_worker"]:
+            return
+
+        if event.state == Worker.State.SUCCESS:
+            result = event.worker.result
+            if result and result.get("success"):
+                self._handle_fetch_success(result)
+            else:
+                error = result.get("error", "Unknown error") if result else "Unknown error"
+                self._handle_fetch_failure(error)
+        elif event.state == Worker.State.ERROR:
+            error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+            self._handle_fetch_failure(error_msg)
+        elif event.state == Worker.State.CANCELLED:
+            self._handle_fetch_failure("Operation was cancelled")
+
+    def _handle_fetch_success(self, result: dict) -> None:
+        """Handle successful fetch operation.
+
+        Args:
+            result: Result dictionary from fetch operation
+        """
+        self._update_status("[green]✓ Fetch completed successfully![/]")
+
+        # Show result screen with summary
+        self.app.push_screen(ResultScreen(result))
+
+        # Re-enable buttons
+        self._set_buttons_enabled(True)
+
+    def _handle_fetch_failure(self, message: str) -> None:
+        """Handle fetch failure.
+
+        Args:
+            message: Error message to display
+        """
+        self._update_status(f"[red]❌ {message}[/]")
+        self.notify(f"Fetch failed: {message}", severity="error")
+
+        # Re-enable buttons for retry
+        self._set_buttons_enabled(True)
 
     def action_logout(self) -> None:
         """Logout and return to login screen."""
+        # Cancel any running worker
+        if self._fetch_worker and self._fetch_worker.is_running:
+            self._fetch_worker.cancel()
         self.app.clear_scraper()
         self.app.switch_screen("login")
 
@@ -263,3 +493,86 @@ class SearchScreen(Screen):
     def action_back(self) -> None:
         """Return to main menu."""
         self.app.pop_screen()
+
+
+class UserIdInputScreen(ModalScreen[str | None]):
+    """Modal screen for entering a user ID."""
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="userid-dialog"):
+            yield Label("Enter User ID", id="userid-title")
+            yield Input(placeholder="User ID (e.g., abc123...)", id="userid-input")
+            with Horizontal(id="userid-buttons"):
+                yield Button("Cancel", id="cancel-btn", variant="error")
+                yield Button("Fetch", id="fetch-btn", variant="primary")
+
+    def on_mount(self) -> None:
+        """Focus the input on mount."""
+        self.query_one("#userid-input", Input).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        if event.button.id == "fetch-btn":
+            user_id = self.query_one("#userid-input", Input).value.strip()
+            if user_id:
+                self.dismiss(user_id)
+            else:
+                self.notify("Please enter a user ID", severity="warning")
+        elif event.button.id == "cancel-btn":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Cancel and close the modal."""
+        self.dismiss(None)
+
+
+class ResultScreen(ModalScreen[None]):
+    """Modal screen for showing fetch results summary."""
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+    ]
+
+    def __init__(self, result: dict) -> None:
+        super().__init__()
+        self.result = result
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="result-dialog"):
+            yield Label("Fetch Results", id="result-title")
+
+            # Show summary based on result type
+            if self.result.get("type") == "own_profile":
+                yield Label("[green]✓ Successfully fetched your profile![/]")
+            elif self.result.get("type") == "external_profile":
+                user_id = self.result.get("user_id", "Unknown")
+                yield Label(f"[green]✓ Successfully fetched profile for:[/] {user_id}")
+
+            yield Label(f"\n[bold]Tables directory:[/] {self.result.get('tables_dir', 'N/A')}")
+
+            tables = self.result.get("tables_written", [])
+            if tables:
+                yield Label(f"\n[bold]Files written ({len(tables)}):[/]")
+                for table in tables[:10]:  # Show first 10
+                    yield Label(f"  • {table}")
+                if len(tables) > 10:
+                    yield Label(f"  ... and {len(tables) - 10} more")
+            else:
+                yield Label("\n[yellow]No tables were written[/]")
+
+            with Center():
+                yield Button("Close", id="close-btn", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press."""
+        if event.button.id == "close-btn":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)

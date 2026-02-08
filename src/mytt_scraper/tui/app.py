@@ -8,7 +8,7 @@ from textual.widgets import Footer, Header
 
 from ..scraper import MyTischtennisScraper
 from ..player_search import PlayerSearcher
-from .screens import LoginScreen, MainMenuScreen, SearchScreen
+from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen
 
 __all__ = ["MyttScraperApp"]
 
@@ -36,25 +36,54 @@ class MyttScraperApp(App):
         border: solid green;
         padding: 1 2;
     }
-    
+
     #login-title, #menu-title, #search-title {
         text-align: center;
         text-style: bold;
         margin-bottom: 1;
     }
-    
-    #login-status, #search-status {
+
+    #login-status, #search-status, #menu-status {
         margin-top: 1;
+        margin-bottom: 1;
         text-align: center;
     }
-    
+
+    #userid-dialog, #result-dialog {
+        align: center middle;
+        width: 60;
+        height: auto;
+        border: solid blue;
+        padding: 1 2;
+        background: $surface;
+    }
+
+    #userid-title, #result-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #userid-buttons {
+        align: center middle;
+        margin-top: 1;
+    }
+
+    #userid-buttons Button {
+        margin: 0 1;
+    }
+
     Button {
         width: 30;
         margin: 1;
     }
-    
+
     Input {
         margin: 1 0;
+    }
+
+    Screen {
+        align: center middle;
     }
     """
 
@@ -62,6 +91,8 @@ class MyttScraperApp(App):
         "login": LoginScreen,
         "main_menu": MainMenuScreen,
         "search": SearchScreen,
+        "user_id_input": UserIdInputScreen,
+        "result": ResultScreen,
     }
 
     BINDINGS = [
