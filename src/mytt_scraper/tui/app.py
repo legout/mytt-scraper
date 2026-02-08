@@ -31,10 +31,15 @@ class MyttScraperApp(App):
     CSS = """
     #login-container, #menu-container, #search-container {
         align: center middle;
-        width: 60;
+        width: 80;
         height: auto;
         border: solid green;
         padding: 1 2;
+    }
+
+    #search-container {
+        width: 100;
+        height: 90%;
     }
 
     #login-title, #menu-title, #search-title {
@@ -56,6 +61,48 @@ class MyttScraperApp(App):
         border: solid blue;
         padding: 1 2;
         background: $surface;
+    }
+
+    /* Search Screen Styles */
+    #search-options {
+        height: auto;
+        margin: 1 0;
+        align: left middle;
+    }
+
+    #search-options Label {
+        width: auto;
+        margin-right: 1;
+    }
+
+    #search-options Switch {
+        margin-right: 1;
+    }
+
+    #mode-indicator {
+        width: auto;
+        color: $text-muted;
+    }
+
+    #results-table {
+        height: 1fr;
+        margin: 1 0;
+        border: solid $primary;
+    }
+
+    #results-table:focus {
+        border: solid $accent;
+    }
+
+    #selection-bar {
+        height: auto;
+        margin-top: 1;
+        align: left middle;
+    }
+
+    #selection-info {
+        width: 1fr;
+        content-align: left middle;
     }
 
     #userid-title, #result-title {

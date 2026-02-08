@@ -5,7 +5,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Center, Vertical, Horizontal
 from textual.screen import Screen, ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Label, Static, DataTable
+from textual.widgets import Button, Footer, Header, Input, Label, Static, DataTable, Switch, Checkbox
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
@@ -460,38 +460,368 @@ class MainMenuScreen(Screen):
 
 
 class SearchScreen(Screen):
-    """Screen for searching players."""
+    """Screen for searching players with API/Playwright toggle and results table.
+
+    Features:
+    - Search mode toggle (API vs Playwright)
+    - Results displayed in a selectable DataTable
+    - Selecting a row exposes user-id for fetch
+    - Background worker for non-blocking search
+    """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("escape", "back", "Back"),
+        ("enter", "select_and_fetch", "Fetch Selected"),
+        ("f", "fetch_selected", "Fetch"),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._search_worker: Worker | None = None
+        self._search_results: list[dict] = []
+        self._selected_user_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="search-container"):
             yield Label("Search Players", id="search-title")
+
+            # Search input and mode toggle
             yield Input(placeholder="Search by name...", id="search-input")
+            with Horizontal(id="search-options"):
+                yield Label("Use Playwright:", id="playwright-label")
+                yield Switch(id="playwright-toggle", value=False)
+                yield Static("(API mode)", id="mode-indicator")
+
             with Center():
                 yield Button("Search", id="search-btn", variant="primary")
+
             yield Static("Enter a name to search", id="search-status")
+
+            # Results table (initially hidden/empty)
+            yield DataTable(id="results-table")
+
+            # Selection info and fetch button
+            with Horizontal(id="selection-bar"):
+                yield Static("No player selected", id="selection-info")
+                yield Button("Fetch Selected", id="fetch-btn", variant="success", disabled=True)
+
         yield Footer()
 
+    def on_mount(self) -> None:
+        """Initialize the results table."""
+        table = self.query_one("#results-table", DataTable)
+        table.add_columns("Name", "Club", "TTR", "User ID")
+        table.cursor_type = "row"
+        table.disabled = True  # Disabled until we have results
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle search mode toggle."""
+        if event.switch.id == "playwright-toggle":
+            indicator = self.query_one("#mode-indicator", Static)
+            if event.value:
+                indicator.update("(Playwright mode)")
+            else:
+                indicator.update("(API mode)")
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle search button press."""
+        """Handle button presses."""
         if event.button.id == "search-btn":
-            query = self.query_one("#search-input", Input).value
-            status = self.query_one("#search-status", Static)
+            self._start_search()
+        elif event.button.id == "fetch-btn":
+            self._fetch_selected_player()
 
-            if not query:
-                status.update("[red]Please enter a search term[/]")
-                return
+    def _start_search(self) -> None:
+        """Validate inputs and start background search worker."""
+        query_input = self.query_one("#search-input", Input)
+        search_btn = self.query_one("#search-btn", Button)
+        status = self.query_one("#search-status", Static)
+        table = self.query_one("#results-table", DataTable)
+        use_playwright = self.query_one("#playwright-toggle", Switch).value
 
-            # Placeholder: In full implementation, this would call search_players
-            status.update(f"[yellow]Searching for '{query}'... (placeholder)[/]")
+        query = query_input.value.strip()
+
+        if not query:
+            status.update("[red]Please enter a search term[/]")
+            return
+
+        # Check authentication
+        if not self.app.is_authenticated():
+            status.update("[red]Not authenticated. Please login first.[/]")
+            return
+
+        # Disable controls during search
+        query_input.disabled = True
+        search_btn.disabled = True
+        search_btn.label = "Searching..."
+
+        # Clear previous results
+        table.clear()
+        table.disabled = True
+        self._search_results = []
+        self._selected_user_id = None
+        self._update_selection_info()
+
+        mode_text = "Playwright" if use_playwright else "API"
+        status.update(f"[yellow]🔄 Searching via {mode_text} for '{query}'...[/]")
+
+        # Run search in background worker
+        scraper = self.app.get_scraper()
+        self._search_worker = self.run_worker(
+            self._do_search(scraper, query, use_playwright),
+            name="search_worker",
+            description=f"Search for players: {query}",
+        )
+
+    async def _do_search(self, scraper, query: str, use_playwright: bool) -> list[dict]:
+        """Background worker to perform player search.
+
+        Args:
+            scraper: Authenticated scraper instance (PlayerSearcher)
+            query: Search query string
+            use_playwright: Whether to use Playwright mode
+
+        Returns:
+            List of player dictionaries
+        """
+        try:
+            # PlayerSearcher has search_players method
+            if hasattr(scraper, 'search_players'):
+                results = scraper.search_players(query, use_playwright=use_playwright)
+                return results
+            else:
+                return []
+        except Exception as e:
+            self.app.call_from_thread(
+                self._update_status, f"[red]Search error: {e}[/]"
+            )
+            return []
+
+    def _update_status(self, message: str) -> None:
+        """Update the status display."""
+        status = self.query_one("#search-status", Static)
+        status.update(message)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle search worker completion."""
+        if event.worker.name != "search_worker":
+            return
+
+        if event.state == Worker.State.SUCCESS:
+            results = event.worker.result or []
+            self._handle_search_success(results)
+        elif event.state == Worker.State.ERROR:
+            error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+            self._handle_search_failure(f"Search error: {error_msg}")
+        elif event.state == Worker.State.CANCELLED:
+            self._handle_search_failure("Search was cancelled")
+
+    def _handle_search_success(self, results: list[dict]) -> None:
+        """Handle successful search - populate results table."""
+        self._search_results = results
+        status = self.query_one("#search-status", Static)
+        table = self.query_one("#results-table", DataTable)
+
+        if not results:
+            status.update("[yellow]No players found[/]")
+            table.disabled = True
+        else:
+            status.update(f"[green]✓ Found {len(results)} player(s)[/]")
+            table.disabled = False
+
+            # Populate table
+            for player in results:
+                # Build display name
+                name = player.get('name', '')
+                if not name:
+                    firstname = player.get('firstname', player.get('firstName', ''))
+                    lastname = player.get('lastname', player.get('lastName', ''))
+                    name = f"{firstname} {lastname}".strip()
+
+                club = player.get('club', player.get('clubName', 'N/A'))
+                ttr = str(player.get('ttr', 'N/A'))
+                user_id = player.get('user_id', player.get('personId', 'N/A'))
+
+                table.add_row(name, club, ttr, user_id, key=user_id)
+
+        # Re-enable controls
+        self._enable_search_form()
+
+    def _handle_search_failure(self, message: str) -> None:
+        """Handle search failure."""
+        self._update_status(f"[red]❌ {message}[/]")
+        self._enable_search_form()
+
+    def _enable_search_form(self) -> None:
+        """Re-enable search form controls."""
+        query_input = self.query_one("#search-input", Input)
+        search_btn = self.query_one("#search-btn", Button)
+
+        query_input.disabled = False
+        search_btn.disabled = False
+        search_btn.label = "Search"
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection in results table."""
+        self._selected_user_id = event.row_key.value
+        self._update_selection_info()
+
+    def _update_selection_info(self) -> None:
+        """Update selection info display and fetch button state."""
+        info = self.query_one("#selection-info", Static)
+        fetch_btn = self.query_one("#fetch-btn", Button)
+
+        if self._selected_user_id:
+            # Find player name from results
+            player_name = "Unknown"
+            for player in self._search_results:
+                uid = player.get('user_id', player.get('personId', ''))
+                if uid == self._selected_user_id:
+                    player_name = player.get('name', '')
+                    if not player_name:
+                        firstname = player.get('firstname', player.get('firstName', ''))
+                        lastname = player.get('lastname', player.get('lastName', ''))
+                        player_name = f"{firstname} {lastname}".strip()
+                    break
+
+            info.update(f"Selected: {player_name}")
+            fetch_btn.disabled = False
+        else:
+            info.update("No player selected")
+            fetch_btn.disabled = True
+
+    def _fetch_selected_player(self) -> None:
+        """Fetch the selected player's profile."""
+        if not self._selected_user_id:
+            self.notify("No player selected", severity="warning")
+            return
+
+        scraper = self.app.get_scraper()
+        if not scraper:
+            self.notify("Not authenticated", severity="error")
+            return
+
+        # Show confirmation and start fetch
+        self.notify(f"Fetching profile for user: {self._selected_user_id}")
+
+        # Start fetch in background worker
+        self.run_worker(
+            self._do_fetch_external_profile(scraper, self._selected_user_id),
+            name="fetch_external_worker",
+            description=f"Fetch external profile: {self._selected_user_id}",
+        )
+
+    async def _do_fetch_external_profile(self, scraper, user_id: str) -> dict:
+        """Background worker to fetch external profile.
+
+        Args:
+            scraper: Authenticated scraper instance
+            user_id: User ID to fetch
+
+        Returns:
+            Dictionary with success status and result info
+        """
+        try:
+            # Login first
+            if hasattr(scraper, 'login') and not scraper.login():
+                return {"success": False, "error": "Login failed"}
+
+            # Fetch external profile data
+            if hasattr(scraper, 'run_external_profile'):
+                data = scraper.run_external_profile(user_id)
+
+                if data:
+                    tables_dir = scraper.tables_dir
+                    tables_written = self._get_tables_written(tables_dir, prefix=f"{user_id}_")
+
+                    return {
+                        "success": True,
+                        "type": "external_profile",
+                        "user_id": user_id,
+                        "tables_dir": str(tables_dir),
+                        "tables_written": tables_written,
+                    }
+                else:
+                    return {"success": False, "error": "Failed to fetch profile data"}
+            else:
+                return {"success": False, "error": "Scraper doesn't support external profile fetch"}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _get_tables_written(self, tables_dir: Path, prefix: str = "") -> list[str]:
+        """Get list of CSV files written to tables directory."""
+        if not tables_dir.exists():
+            return []
+
+        files = []
+        for f in tables_dir.iterdir():
+            if f.is_file() and f.suffix == ".csv":
+                if not prefix or f.name.startswith(prefix):
+                    files.append(f.name)
+
+        return sorted(files)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker state changes for all workers."""
+        # Handle search worker
+        if event.worker.name == "search_worker":
+            if event.state == Worker.State.SUCCESS:
+                results = event.worker.result or []
+                self._handle_search_success(results)
+            elif event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._handle_search_failure(f"Search error: {error_msg}")
+            elif event.state == Worker.State.CANCELLED:
+                self._handle_search_failure("Search was cancelled")
+            return
+
+        # Handle fetch worker
+        if event.worker.name == "fetch_external_worker":
+            if event.state == Worker.State.SUCCESS:
+                result = event.worker.result
+                if result and result.get("success"):
+                    self._handle_fetch_success(result)
+                else:
+                    error = result.get("error", "Unknown error") if result else "Unknown error"
+                    self._handle_fetch_failure(error)
+            elif event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._handle_fetch_failure(error_msg)
+            elif event.state == Worker.State.CANCELLED:
+                self._handle_fetch_failure("Fetch was cancelled")
+            return
+
+    def _handle_fetch_success(self, result: dict) -> None:
+        """Handle successful fetch operation."""
+        self._update_status("[green]✓ Fetch completed successfully![/]")
+        # Show result screen with summary
+        self.app.push_screen(ResultScreen(result))
+
+    def _handle_fetch_failure(self, message: str) -> None:
+        """Handle fetch failure."""
+        self._update_status(f"[red]❌ {message}[/]")
+        self.notify(f"Fetch failed: {message}", severity="error")
+
+    def action_select_and_fetch(self) -> None:
+        """Keyboard shortcut: Select current row and fetch."""
+        table = self.query_one("#results-table", DataTable)
+        if table.cursor_row is not None:
+            row_key = table.get_row_at(table.cursor_row)
+            if row_key:
+                self._selected_user_id = str(row_key)
+                self._fetch_selected_player()
+
+    def action_fetch_selected(self) -> None:
+        """Keyboard shortcut: Fetch selected player."""
+        self._fetch_selected_player()
 
     def action_back(self) -> None:
         """Return to main menu."""
+        # Cancel any running worker
+        if self._search_worker and self._search_worker.is_running:
+            self._search_worker.cancel()
         self.app.pop_screen()
 
 
