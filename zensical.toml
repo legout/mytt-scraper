@@ -1,7 +1,6 @@
-[site]
-name = "mytt-scraper Documentation"
-description = "Documentation for mytt-scraper - a Python scraper for mytischtennis.de"
-url = "https://legout.github.io/mytt-scraper"
+site_name = "mytt-scraper"
+site_description = "Documentation for mytt-scraper - a Python scraper for mytischtennis.de"
+site_url = "https://legout.github.io/mytt-scraper"
 
 [nav]
 Home = "README.md"
