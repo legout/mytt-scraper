@@ -14,6 +14,9 @@ from .config import (
 )
 from .player_search import PlayerSearcher
 from .scraper import MyTischtennisScraper
+
+# In-memory table extraction - available both as module-level function
+# and as method on MyTischtennisScraper instance
 from .utils import extract_flat_tables
 
 __all__ = [
