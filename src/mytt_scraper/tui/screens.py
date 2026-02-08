@@ -1376,9 +1376,7 @@ class TablePreviewScreen(Screen):
 
             if source == TableSource.MEMORY:
                 # In-memory data (Polars DataFrame or PyArrow Table)
-                self.app.call_from_thread(
-                    self._update_status, f"[yellow]📂 Loading {table_info.display_name}...[/]"
-                )
+                self._update_status(f"[yellow]📂 Loading {table_info.display_name}...[/]")
                 if hasattr(data, "to_polars"):
                     # PyArrow Table - convert to Polars
                     df = data.to_polars()
@@ -1391,9 +1389,7 @@ class TablePreviewScreen(Screen):
             else:
                 # Disk-based: data is a Path - use lazy loading with .head()
                 csv_path = data
-                self.app.call_from_thread(
-                    self._update_status, f"[yellow]📂 Loading {table_info.display_name} (lazy)...[/]"
-                )
+                self._update_status(f"[yellow]📂 Loading {table_info.display_name} (lazy)...[/]")
                 # Use lazy evaluation: scan CSV and only load first N rows
                 # This avoids loading the entire file into memory
                 lazy_df = pl.scan_csv(csv_path)
