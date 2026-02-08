@@ -25,6 +25,7 @@ build-backend = "hatchling.build"
 dev = [
     "ipython>=9.10.0",
     "pytest>=8.0.0",
+    "zensical",
 ]
 
 [tool.hatch.build.targets.wheel]

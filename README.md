@@ -220,7 +220,23 @@ See [docs/USAGE.md](docs/USAGE.md) for detailed table schemas and field descript
 
 ## Documentation
 
-This project uses [Diátaxis](https://diataxis.fr/) documentation structure. Choose your path:
+This project uses [Diátaxis](https://diataxis.fr/) documentation structure with [Zensical](https://zensical.io/) as the documentation site generator.
+
+### Building Documentation Locally
+
+Preview the documentation site locally:
+
+```bash
+# Serve docs with hot reload (development)
+uv run zensical serve
+
+# Build static site (production)
+uv run zensical build
+```
+
+The built site will be in the `site/` directory.
+
+Choose your documentation path:
 
 | Section | Purpose |
 |---------|---------|
