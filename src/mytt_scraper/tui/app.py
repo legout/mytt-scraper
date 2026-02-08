@@ -8,7 +8,7 @@ from textual.widgets import Footer, Header
 
 from ..scraper import MyTischtennisScraper
 from ..player_search import PlayerSearcher
-from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen
+from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen
 
 __all__ = ["MyttScraperApp"]
 
@@ -103,6 +103,74 @@ class MyttScraperApp(App):
     #selection-info {
         width: 1fr;
         content-align: left middle;
+    }
+
+    /* Selection Controls */
+    #selection-controls {
+        height: auto;
+        margin: 1 0;
+        align: center middle;
+    }
+
+    #selection-controls Button {
+        width: auto;
+        margin: 0 1;
+    }
+
+    #selection-count {
+        width: auto;
+        margin-left: 2;
+        content-align: center middle;
+    }
+
+    /* Batch Fetch Screen Styles */
+    #batch-fetch-container {
+        align: center middle;
+        width: 100;
+        height: 95%;
+        border: solid green;
+        padding: 1 2;
+    }
+
+    #batch-fetch-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #progress-section {
+        height: auto;
+        margin: 1 0;
+        padding: 1;
+        border: solid $primary-darken-2;
+    }
+
+    #progress-status {
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    #stats-section {
+        height: auto;
+        margin: 1 0;
+        align: center middle;
+    }
+
+    #stats-section .stat {
+        width: 1fr;
+        text-align: center;
+        padding: 0 1;
+    }
+
+    #log-label {
+        margin-top: 1;
+        text-style: bold;
+    }
+
+    #fetch-log {
+        height: 1fr;
+        border: solid $primary;
+        padding: 1;
     }
 
     #userid-title, #result-title {

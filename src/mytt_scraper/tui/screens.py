@@ -5,12 +5,18 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Center, Vertical, Horizontal
 from textual.screen import Screen, ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Label, Static, DataTable, Switch, Checkbox
+from textual.widgets import (
+    Button, Footer, Header, Input, Label, Static, DataTable, 
+    Switch, Checkbox, ProgressBar, RichLog
+)
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
 
-__all__ = ["LoginScreen", "MainMenuScreen", "SearchScreen", "UserIdInputScreen", "ResultScreen"]
+__all__ = [
+    "LoginScreen", "MainMenuScreen", "SearchScreen", 
+    "UserIdInputScreen", "ResultScreen", "BatchFetchScreen"
+]
 
 
 class LoginScreen(Screen):
@@ -460,27 +466,26 @@ class MainMenuScreen(Screen):
 
 
 class SearchScreen(Screen):
-    """Screen for searching players with API/Playwright toggle and results table.
+    """Screen for searching players with API/Playwright toggle and multi-select results.
 
     Features:
     - Search mode toggle (API vs Playwright)
-    - Results displayed in a selectable DataTable
-    - Selecting a row exposes user-id for fetch
+    - Results displayed in a DataTable with checkboxes for multi-select
+    - Multi-select support for batch fetching
     - Background worker for non-blocking search
     """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("escape", "back", "Back"),
-        ("enter", "select_and_fetch", "Fetch Selected"),
-        ("f", "fetch_selected", "Fetch"),
+        ("space", "toggle_selection", "Toggle Select"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self._search_worker: Worker | None = None
         self._search_results: list[dict] = []
-        self._selected_user_id: str | None = None
+        self._selected_user_ids: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -499,20 +504,30 @@ class SearchScreen(Screen):
 
             yield Static("Enter a name to search", id="search-status")
 
+            # Selection controls (hidden until results)
+            with Horizontal(id="selection-controls"):
+                yield Button("Select All", id="select-all-btn", disabled=True)
+                yield Button("Clear Selection", id="clear-selection-btn", disabled=True)
+                yield Static("0 selected", id="selection-count")
+
             # Results table (initially hidden/empty)
             yield DataTable(id="results-table")
 
-            # Selection info and fetch button
-            with Horizontal(id="selection-bar"):
-                yield Static("No player selected", id="selection-info")
-                yield Button("Fetch Selected", id="fetch-btn", variant="success", disabled=True)
+            # Fetch button
+            with Center():
+                yield Button(
+                    "Fetch Selected Players", 
+                    id="fetch-btn", 
+                    variant="success", 
+                    disabled=True
+                )
 
         yield Footer()
 
     def on_mount(self) -> None:
         """Initialize the results table."""
         table = self.query_one("#results-table", DataTable)
-        table.add_columns("Name", "Club", "TTR", "User ID")
+        table.add_columns("✓", "Name", "Club", "TTR", "User ID")
         table.cursor_type = "row"
         table.disabled = True  # Disabled until we have results
 
@@ -529,8 +544,12 @@ class SearchScreen(Screen):
         """Handle button presses."""
         if event.button.id == "search-btn":
             self._start_search()
+        elif event.button.id == "select-all-btn":
+            self._select_all()
+        elif event.button.id == "clear-selection-btn":
+            self._clear_selection()
         elif event.button.id == "fetch-btn":
-            self._fetch_selected_player()
+            self._start_batch_fetch()
 
     def _start_search(self) -> None:
         """Validate inputs and start background search worker."""
@@ -560,8 +579,8 @@ class SearchScreen(Screen):
         table.clear()
         table.disabled = True
         self._search_results = []
-        self._selected_user_id = None
-        self._update_selection_info()
+        self._selected_user_ids.clear()
+        self._update_selection_ui()
 
         mode_text = "Playwright" if use_playwright else "API"
         status.update(f"[yellow]🔄 Searching via {mode_text} for '{query}'...[/]")
@@ -626,9 +645,11 @@ class SearchScreen(Screen):
         if not results:
             status.update("[yellow]No players found[/]")
             table.disabled = True
+            self._set_selection_controls_enabled(False)
         else:
             status.update(f"[green]✓ Found {len(results)} player(s)[/]")
             table.disabled = False
+            self._set_selection_controls_enabled(True)
 
             # Populate table
             for player in results:
@@ -643,7 +664,9 @@ class SearchScreen(Screen):
                 ttr = str(player.get('ttr', 'N/A'))
                 user_id = player.get('user_id', player.get('personId', 'N/A'))
 
-                table.add_row(name, club, ttr, user_id, key=user_id)
+                # Checkbox column shows "☐" or "☑" based on selection
+                checkbox = "☐"
+                table.add_row(checkbox, name, club, ttr, user_id, key=user_id)
 
         # Re-enable controls
         self._enable_search_form()
@@ -652,6 +675,7 @@ class SearchScreen(Screen):
         """Handle search failure."""
         self._update_status(f"[red]❌ {message}[/]")
         self._enable_search_form()
+        self._set_selection_controls_enabled(False)
 
     def _enable_search_form(self) -> None:
         """Re-enable search form controls."""
@@ -662,160 +686,113 @@ class SearchScreen(Screen):
         search_btn.disabled = False
         search_btn.label = "Search"
 
+    def _set_selection_controls_enabled(self, enabled: bool) -> None:
+        """Enable or disable selection control buttons."""
+        select_all_btn = self.query_one("#select-all-btn", Button)
+        clear_selection_btn = self.query_one("#clear-selection-btn", Button)
+        
+        select_all_btn.disabled = not enabled
+        clear_selection_btn.disabled = not enabled
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection in results table."""
-        self._selected_user_id = event.row_key.value
-        self._update_selection_info()
-
-    def _update_selection_info(self) -> None:
-        """Update selection info display and fetch button state."""
-        info = self.query_one("#selection-info", Static)
-        fetch_btn = self.query_one("#fetch-btn", Button)
-
-        if self._selected_user_id:
-            # Find player name from results
-            player_name = "Unknown"
-            for player in self._search_results:
-                uid = player.get('user_id', player.get('personId', ''))
-                if uid == self._selected_user_id:
-                    player_name = player.get('name', '')
-                    if not player_name:
-                        firstname = player.get('firstname', player.get('firstName', ''))
-                        lastname = player.get('lastname', player.get('lastName', ''))
-                        player_name = f"{firstname} {lastname}".strip()
-                    break
-
-            info.update(f"Selected: {player_name}")
-            fetch_btn.disabled = False
-        else:
-            info.update("No player selected")
-            fetch_btn.disabled = True
-
-    def _fetch_selected_player(self) -> None:
-        """Fetch the selected player's profile."""
-        if not self._selected_user_id:
-            self.notify("No player selected", severity="warning")
+        """Handle row selection in results table - toggle checkbox."""
+        user_id = event.row_key.value
+        if not user_id:
             return
 
-        scraper = self.app.get_scraper()
-        if not scraper:
-            self.notify("Not authenticated", severity="error")
-            return
-
-        # Show confirmation and start fetch
-        self.notify(f"Fetching profile for user: {self._selected_user_id}")
-
-        # Start fetch in background worker
-        self.run_worker(
-            self._do_fetch_external_profile(scraper, self._selected_user_id),
-            name="fetch_external_worker",
-            description=f"Fetch external profile: {self._selected_user_id}",
-        )
-
-    async def _do_fetch_external_profile(self, scraper, user_id: str) -> dict:
-        """Background worker to fetch external profile.
-
-        Args:
-            scraper: Authenticated scraper instance
-            user_id: User ID to fetch
-
-        Returns:
-            Dictionary with success status and result info
-        """
-        try:
-            # Login first
-            if hasattr(scraper, 'login') and not scraper.login():
-                return {"success": False, "error": "Login failed"}
-
-            # Fetch external profile data
-            if hasattr(scraper, 'run_external_profile'):
-                data = scraper.run_external_profile(user_id)
-
-                if data:
-                    tables_dir = scraper.tables_dir
-                    tables_written = self._get_tables_written(tables_dir, prefix=f"{user_id}_")
-
-                    return {
-                        "success": True,
-                        "type": "external_profile",
-                        "user_id": user_id,
-                        "tables_dir": str(tables_dir),
-                        "tables_written": tables_written,
-                    }
-                else:
-                    return {"success": False, "error": "Failed to fetch profile data"}
-            else:
-                return {"success": False, "error": "Scraper doesn't support external profile fetch"}
-
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def _get_tables_written(self, tables_dir: Path, prefix: str = "") -> list[str]:
-        """Get list of CSV files written to tables directory."""
-        if not tables_dir.exists():
-            return []
-
-        files = []
-        for f in tables_dir.iterdir():
-            if f.is_file() and f.suffix == ".csv":
-                if not prefix or f.name.startswith(prefix):
-                    files.append(f.name)
-
-        return sorted(files)
-
-    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        """Handle worker state changes for all workers."""
-        # Handle search worker
-        if event.worker.name == "search_worker":
-            if event.state == Worker.State.SUCCESS:
-                results = event.worker.result or []
-                self._handle_search_success(results)
-            elif event.state == Worker.State.ERROR:
-                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
-                self._handle_search_failure(f"Search error: {error_msg}")
-            elif event.state == Worker.State.CANCELLED:
-                self._handle_search_failure("Search was cancelled")
-            return
-
-        # Handle fetch worker
-        if event.worker.name == "fetch_external_worker":
-            if event.state == Worker.State.SUCCESS:
-                result = event.worker.result
-                if result and result.get("success"):
-                    self._handle_fetch_success(result)
-                else:
-                    error = result.get("error", "Unknown error") if result else "Unknown error"
-                    self._handle_fetch_failure(error)
-            elif event.state == Worker.State.ERROR:
-                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
-                self._handle_fetch_failure(error_msg)
-            elif event.state == Worker.State.CANCELLED:
-                self._handle_fetch_failure("Fetch was cancelled")
-            return
-
-    def _handle_fetch_success(self, result: dict) -> None:
-        """Handle successful fetch operation."""
-        self._update_status("[green]✓ Fetch completed successfully![/]")
-        # Show result screen with summary
-        self.app.push_screen(ResultScreen(result))
-
-    def _handle_fetch_failure(self, message: str) -> None:
-        """Handle fetch failure."""
-        self._update_status(f"[red]❌ {message}[/]")
-        self.notify(f"Fetch failed: {message}", severity="error")
-
-    def action_select_and_fetch(self) -> None:
-        """Keyboard shortcut: Select current row and fetch."""
         table = self.query_one("#results-table", DataTable)
-        if table.cursor_row is not None:
-            row_key = table.get_row_at(table.cursor_row)
-            if row_key:
-                self._selected_user_id = str(row_key)
-                self._fetch_selected_player()
+        
+        # Toggle selection
+        if user_id in self._selected_user_ids:
+            self._selected_user_ids.discard(user_id)
+        else:
+            self._selected_user_ids.add(user_id)
 
-    def action_fetch_selected(self) -> None:
-        """Keyboard shortcut: Fetch selected player."""
-        self._fetch_selected_player()
+        # Update the checkbox display for this row
+        self._update_row_checkbox(table, user_id)
+        self._update_selection_ui()
+
+    def action_toggle_selection(self) -> None:
+        """Toggle selection of the currently highlighted row."""
+        table = self.query_one("#results-table", DataTable)
+        if table.cursor_row is None:
+            return
+        
+        # Get the row key at cursor position
+        row_key = table.get_row_at(table.cursor_row)
+        if row_key and len(row_key) > 4:
+            user_id = row_key[4]  # User ID is in the 5th column
+            
+            # Toggle selection
+            if user_id in self._selected_user_ids:
+                self._selected_user_ids.discard(user_id)
+            else:
+                self._selected_user_ids.add(user_id)
+            
+            self._update_row_checkbox(table, user_id)
+            self._update_selection_ui()
+
+    def _update_row_checkbox(self, table: DataTable, user_id: str) -> None:
+        """Update the checkbox display for a specific row."""
+        # Get current row data
+        row = table.get_row(user_id)
+        if row:
+            checkbox = "☑" if user_id in self._selected_user_ids else "☐"
+            # Update the row with new checkbox state
+            new_row = (checkbox,) + row[1:]
+            table.update_cell(user_id, table.columns[0].key, checkbox)
+
+    def _select_all(self) -> None:
+        """Select all players in the results."""
+        table = self.query_one("#results-table", DataTable)
+        
+        for player in self._search_results:
+            user_id = player.get('user_id', player.get('personId', ''))
+            if user_id:
+                self._selected_user_ids.add(user_id)
+                self._update_row_checkbox(table, user_id)
+        
+        self._update_selection_ui()
+
+    def _clear_selection(self) -> None:
+        """Clear all selections."""
+        table = self.query_one("#results-table", DataTable)
+        
+        for user_id in list(self._selected_user_ids):
+            self._update_row_checkbox(table, user_id)
+        
+        self._selected_user_ids.clear()
+        self._update_selection_ui()
+
+    def _update_selection_ui(self) -> None:
+        """Update selection count display and fetch button state."""
+        count_label = self.query_one("#selection-count", Static)
+        fetch_btn = self.query_one("#fetch-btn", Button)
+        
+        count = len(self._selected_user_ids)
+        count_label.update(f"{count} selected")
+        fetch_btn.disabled = count == 0
+        
+        if count > 0:
+            fetch_btn.label = f"Fetch {count} Player{'s' if count > 1 else ''}"
+        else:
+            fetch_btn.label = "Fetch Selected Players"
+
+    def _start_batch_fetch(self) -> None:
+        """Start batch fetch for selected players."""
+        if not self._selected_user_ids:
+            self.notify("No players selected", severity="warning")
+            return
+
+        # Get player info for selected users
+        selected_players = []
+        for player in self._search_results:
+            user_id = player.get('user_id', player.get('personId', ''))
+            if user_id in self._selected_user_ids:
+                selected_players.append(player)
+
+        # Push the batch fetch screen
+        self.app.push_screen(BatchFetchScreen(selected_players))
 
     def action_back(self) -> None:
         """Return to main menu."""
@@ -823,6 +800,315 @@ class SearchScreen(Screen):
         if self._search_worker and self._search_worker.is_running:
             self._search_worker.cancel()
         self.app.pop_screen()
+
+
+class BatchFetchScreen(Screen):
+    """Screen for batch fetching multiple player profiles with progress tracking.
+
+    Features:
+    - Progress bar showing overall completion
+    - Per-player status log
+    - Error handling without aborting
+    - Completion summary with success/failure counts
+    """
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("escape", "cancel", "Cancel"),
+        ("c", "cancel", "Cancel Fetch"),
+    ]
+
+    def __init__(self, players: list[dict]) -> None:
+        super().__init__()
+        self._players = players
+        self._fetch_worker: Worker | None = None
+        self._cancelled = False
+        self._results: list[dict] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Vertical(id="batch-fetch-container"):
+            yield Label("Batch Fetch Progress", id="batch-fetch-title")
+            
+            # Progress section
+            with Vertical(id="progress-section"):
+                yield Static(
+                    f"Fetching {len(self._players)} player(s)...", 
+                    id="progress-status"
+                )
+                yield ProgressBar(
+                    total=len(self._players),
+                    show_eta=False,
+                    id="progress-bar"
+                )
+            
+            # Stats section
+            with Horizontal(id="stats-section"):
+                yield Static("✓ Success: 0", id="success-count", classes="stat")
+                yield Static("✗ Failed: 0", id="failure-count", classes="stat")
+                yield Static("⏳ Remaining: 0", id="remaining-count", classes="stat")
+            
+            # Log of per-player results
+            yield Label("Fetch Log:", id="log-label")
+            yield RichLog(id="fetch-log", highlight=True, markup=True)
+            
+            # Action buttons
+            with Center():
+                yield Button(
+                    "Cancel", 
+                    id="cancel-btn", 
+                    variant="error"
+                )
+                yield Button(
+                    "Back to Search", 
+                    id="back-btn", 
+                    variant="primary",
+                    disabled=True
+                )
+
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Start batch fetch when screen mounts."""
+        self._update_stats()
+        self._start_batch_fetch()
+
+    def _start_batch_fetch(self) -> None:
+        """Start the background worker for batch fetching."""
+        scraper = self.app.get_scraper()
+        if not scraper:
+            self._log_message("[red]❌ Not authenticated[/]")
+            return
+
+        self._fetch_worker = self.run_worker(
+            self._do_batch_fetch(scraper),
+            name="batch_fetch_worker",
+            description=f"Batch fetch {len(self._players)} players",
+        )
+
+    async def _do_batch_fetch(self, scraper) -> dict:
+        """Background worker to fetch all selected players sequentially.
+
+        Args:
+            scraper: Authenticated scraper instance
+
+        Returns:
+            Dictionary with summary statistics
+        """
+        success_count = 0
+        failure_count = 0
+        failed_players: list[tuple[str, str]] = []
+        tables_dir = scraper.tables_dir if hasattr(scraper, 'tables_dir') else Path("tables")
+
+        # Ensure logged in
+        self.app.call_from_thread(
+            self._log_message, "[yellow]🔐 Logging in...[/]"
+        )
+        
+        try:
+            if hasattr(scraper, 'login') and not scraper.login():
+                self.app.call_from_thread(
+                    self._log_message, "[red]❌ Login failed[/]"
+                )
+                return {
+                    "success": False,
+                    "error": "Login failed",
+                    "success_count": 0,
+                    "failure_count": len(self._players),
+                }
+        except Exception as e:
+            self.app.call_from_thread(
+                self._log_message, f"[red]❌ Login error: {e}[/]"
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "success_count": 0,
+                "failure_count": len(self._players),
+            }
+
+        self.app.call_from_thread(
+            self._log_message, "[green]✓ Logged in successfully[/]"
+        )
+
+        # Fetch each player
+        for i, player in enumerate(self._players, 1):
+            if self._cancelled:
+                self.app.call_from_thread(
+                    self._log_message, "[yellow]⚠ Fetch cancelled by user[/]"
+                )
+                break
+
+            user_id = player.get('user_id', player.get('personId', ''))
+            name = self._get_player_name(player)
+
+            # Update progress
+            self.app.call_from_thread(
+                self._update_progress, i - 1, name
+            )
+
+            # Log start
+            self.app.call_from_thread(
+                self._log_message, f"[{i}/{len(self._players)}] Fetching: [bold]{name}[/] ({user_id})"
+            )
+
+            try:
+                # Fetch the player
+                if hasattr(scraper, 'run_external_profile'):
+                    data = scraper.run_external_profile(user_id)
+                    
+                    if data:
+                        success_count += 1
+                        self.app.call_from_thread(
+                            self._log_message, 
+                            f"  [green]✓ Success[/] - Data fetched for {name}"
+                        )
+                    else:
+                        failure_count += 1
+                        failed_players.append((name, "No data returned"))
+                        self.app.call_from_thread(
+                            self._log_message, 
+                            f"  [red]✗ Failed[/] - No data for {name}"
+                        )
+                else:
+                    failure_count += 1
+                    failed_players.append((name, "Scraper doesn't support external profile"))
+                    self.app.call_from_thread(
+                        self._log_message, 
+                        f"  [red]✗ Failed[/] - Scraper doesn't support external profile fetch"
+                    )
+
+            except Exception as e:
+                failure_count += 1
+                failed_players.append((name, str(e)))
+                self.app.call_from_thread(
+                    self._log_message, 
+                    f"  [red]✗ Error[/] - {name}: {e}"
+                )
+
+            # Small delay between requests to be polite
+            if i < len(self._players) and not self._cancelled:
+                import asyncio
+                await asyncio.sleep(0.5)
+
+            # Update stats
+            self.app.call_from_thread(
+                self._update_stats, success_count, failure_count, 
+                len(self._players) - i
+            )
+
+        # Complete progress bar
+        self.app.call_from_thread(
+            self._update_progress, 
+            success_count + failure_count, 
+            "Complete"
+        )
+
+        # Log summary
+        self.app.call_from_thread(
+            self._log_message, 
+            f"\n[bold]{'='*50}[/]"
+        )
+        self.app.call_from_thread(
+            self._log_message,
+            f"[bold]Batch Fetch Complete:[/] {success_count} success, {failure_count} failed"
+        )
+        self.app.call_from_thread(
+            self._log_message,
+            f"[dim]Output directory: {tables_dir}[/dim]"
+        )
+
+        if failed_players:
+            self.app.call_from_thread(
+                self._log_message, "\n[red]Failed players:[/]"
+            )
+            for name, error in failed_players:
+                self.app.call_from_thread(
+                    self._log_message, f"  • [red]{name}[/]: {error}"
+                )
+
+        # Enable back button
+        self.app.call_from_thread(self._enable_back_button)
+
+        return {
+            "success": True,
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "total": len(self._players),
+            "tables_dir": str(tables_dir),
+            "failed_players": failed_players,
+        }
+
+    def _get_player_name(self, player: dict) -> str:
+        """Get display name for a player."""
+        name = player.get('name', '')
+        if not name:
+            firstname = player.get('firstname', player.get('firstName', ''))
+            lastname = player.get('lastname', player.get('lastName', ''))
+            name = f"{firstname} {lastname}".strip()
+        if not name:
+            name = player.get('user_id', player.get('personId', 'Unknown'))
+        return name
+
+    def _update_progress(self, completed: int, current: str) -> None:
+        """Update the progress bar."""
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
+        progress_bar.advance(1)
+        
+        status = self.query_one("#progress-status", Static)
+        if current == "Complete":
+            status.update(f"Complete - {completed} player(s) processed")
+        else:
+            status.update(f"Fetching: {current}")
+
+    def _update_stats(self, success: int = 0, failure: int = 0, remaining: int = 0) -> None:
+        """Update the statistics display."""
+        success_label = self.query_one("#success-count", Static)
+        failure_label = self.query_one("#failure-count", Static)
+        remaining_label = self.query_one("#remaining-count", Static)
+        
+        success_label.update(f"✓ Success: {success}")
+        failure_label.update(f"✗ Failed: {failure}")
+        remaining_label.update(f"⏳ Remaining: {remaining}")
+
+    def _log_message(self, message: str) -> None:
+        """Add a message to the fetch log."""
+        log = self.query_one("#fetch-log", RichLog)
+        log.write(message)
+
+    def _enable_back_button(self) -> None:
+        """Enable the back button and disable cancel."""
+        cancel_btn = self.query_one("#cancel-btn", Button)
+        back_btn = self.query_one("#back-btn", Button)
+        
+        cancel_btn.disabled = True
+        back_btn.disabled = False
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        if event.button.id == "cancel-btn":
+            self.action_cancel()
+        elif event.button.id == "back-btn":
+            self.app.pop_screen()
+
+    def action_cancel(self) -> None:
+        """Cancel the batch fetch operation."""
+        self._cancelled = True
+        if self._fetch_worker and self._fetch_worker.is_running:
+            self._fetch_worker.cancel()
+        self._log_message("[yellow]⚠ Cancelling...[/]")
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker state changes."""
+        if event.worker.name != "batch_fetch_worker":
+            return
+
+        if event.state in [Worker.State.SUCCESS, Worker.State.ERROR, Worker.State.CANCELLED]:
+            self._enable_back_button()
+            
+            if event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._log_message(f"[red]❌ Worker error: {error_msg}[/]")
 
 
 class UserIdInputScreen(ModalScreen[str | None]):
