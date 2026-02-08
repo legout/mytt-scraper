@@ -1,6 +1,6 @@
 """Main Textual App for mytt-scraper TUI."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from textual.app import App
 from textual.reactive import reactive
@@ -8,7 +8,7 @@ from textual.widgets import Footer, Header
 
 from ..scraper import MyTischtennisScraper
 from ..player_search import PlayerSearcher
-from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen, TablePreviewScreen
+from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen, TablePreviewScreen, TableListScreen
 
 __all__ = ["MyttScraperApp"]
 
@@ -27,6 +27,10 @@ class MyttScraperApp(App):
     
     # Reactive state for authenticated scraper instance
     scraper: reactive[Optional[MyTischtennisScraper]] = reactive(None)
+    
+    # Reactive state for in-memory tables from fetch operations
+    # Dictionary mapping table names to DataFrame/Table objects
+    tables: reactive[dict[str, Any]] = reactive({})
 
     CSS = """
     #login-container, #menu-container, #search-container {
@@ -302,6 +306,7 @@ class MyttScraperApp(App):
         "user_id_input": UserIdInputScreen,
         "result": ResultScreen,
         "table_preview": TablePreviewScreen,
+        "table_list": TableListScreen,
     }
 
     BINDINGS = [
@@ -365,3 +370,33 @@ class MyttScraperApp(App):
             True if authenticated, False otherwise
         """
         return self.scraper is not None
+    
+    def set_tables(self, tables: dict[str, Any]) -> None:
+        """Store in-memory tables from a fetch operation.
+        
+        These tables are available session-wide for viewing.
+        
+        Args:
+            tables: Dictionary mapping table names to DataFrame/Table objects
+        """
+        self.tables = tables
+    
+    def get_tables(self) -> dict[str, Any]:
+        """Get the current in-memory tables.
+        
+        Returns:
+            Dictionary of table name -> DataFrame/Table, or empty dict if none
+        """
+        return self.tables
+    
+    def clear_tables(self) -> None:
+        """Clear all stored in-memory tables."""
+        self.tables = {}
+    
+    def has_tables(self) -> bool:
+        """Check if any in-memory tables are available.
+        
+        Returns:
+            True if tables exist, False otherwise
+        """
+        return len(self.tables) > 0

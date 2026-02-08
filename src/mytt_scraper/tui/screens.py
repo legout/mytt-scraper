@@ -26,7 +26,7 @@ from ..utils.query_executor import (
 __all__ = [
     "LoginScreen", "MainMenuScreen", "SearchScreen",
     "UserIdInputScreen", "ResultScreen", "BatchFetchScreen",
-    "TablePreviewScreen"
+    "TablePreviewScreen", "TableListScreen"
 ]
 
 
@@ -227,13 +227,16 @@ class MainMenuScreen(Screen):
                 yield Button("Search Players", id="search-players")
             with Center():
                 yield Button("Fetch by User ID", id="fetch-by-id")
+            with Center():
+                yield Button("View Tables", id="view-tables", disabled=True)
         yield Footer()
 
     def on_mount(self) -> None:
-        """Check authentication on mount."""
+        """Check authentication on mount and update button states."""
         if not self.app.is_authenticated():
             self.notify("Not authenticated. Please login.", severity="error")
             self.app.switch_screen("login")
+        self._update_view_tables_button()
 
     def _update_status(self, message: str) -> None:
         """Update the status display.
@@ -253,6 +256,13 @@ class MainMenuScreen(Screen):
         for button_id in ["fetch-profile", "search-players", "fetch-by-id"]:
             button = self.query_one(f"#{button_id}", Button)
             button.disabled = not enabled
+        # View tables button is controlled separately based on table availability
+        self._update_view_tables_button()
+
+    def _update_view_tables_button(self) -> None:
+        """Update the View Tables button state based on available tables."""
+        view_tables_btn = self.query_one("#view-tables", Button)
+        view_tables_btn.disabled = not self.app.has_tables()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle menu button presses."""
@@ -264,6 +274,8 @@ class MainMenuScreen(Screen):
             self.app.push_screen("search")
         elif button_id == "fetch-by-id":
             self._show_user_id_input()
+        elif button_id == "view-tables":
+            self.app.push_screen("table_list")
 
     def _start_fetch_own_profile(self) -> None:
         """Start fetching the user's own profile in a background worker."""
@@ -302,13 +314,24 @@ class MainMenuScreen(Screen):
                 return {"success": False, "error": "Login failed"}
 
             self.app.call_from_thread(
-                self._update_status, "[yellow]📊 Extracting tables...[/]"
+                self._update_status, "[yellow]🌐 Fetching data from server...[/]"
             )
 
             # Fetch own profile data
-            data = scraper.run_own_profile()
+            data, remaining = scraper.fetch_own_community()
 
             if data:
+                self.app.call_from_thread(
+                    self._update_status, "[yellow]📊 Extracting tables...[/]"
+                )
+
+                # Extract and save tables to CSV (existing behavior)
+                scraper.extract_and_save_tables(data, remaining)
+
+                # Extract in-memory tables and store in app state
+                tables = scraper.extract_flat_tables(data, remaining, backend="polars")
+                self.app.call_from_thread(self.app.set_tables, tables)
+
                 # Get list of tables that were written
                 tables_dir = scraper.tables_dir
                 tables_written = self._get_tables_written(tables_dir)
@@ -374,16 +397,28 @@ class MainMenuScreen(Screen):
                 return {"success": False, "error": "Login failed"}
 
             self.app.call_from_thread(
-                self._update_status, f"[yellow]📊 Fetching profile for {user_id}...[/]"
+                self._update_status, f"[yellow]🌐 Fetching profile for {user_id}...[/]"
             )
 
             # Fetch external profile data
-            data = scraper.run_external_profile(user_id)
+            data, remaining = scraper.fetch_external_profile(user_id)
 
             if data:
+                self.app.call_from_thread(
+                    self._update_status, "[yellow]📊 Extracting tables...[/]"
+                )
+
+                # Extract and save tables to CSV (existing behavior)
+                prefix = f"{user_id}_"
+                scraper.extract_and_save_tables(data, remaining, prefix=prefix)
+
+                # Extract in-memory tables and store in app state
+                tables = scraper.extract_flat_tables(data, remaining, backend="polars")
+                self.app.call_from_thread(self.app.set_tables, tables)
+
                 # Get list of tables that were written
                 tables_dir = scraper.tables_dir
-                tables_written = self._get_tables_written(tables_dir, prefix=f"{user_id}_")
+                tables_written = self._get_tables_written(tables_dir, prefix=prefix)
 
                 return {
                     "success": True,
@@ -1884,3 +1919,88 @@ class TablePreviewScreen(Screen):
         sql_input = self.query_one("#sql-input", TextArea)
         sql_input.text = "SELECT * FROM data LIMIT 100"
         self._reset_query()
+
+
+class TableListScreen(Screen):
+    """Screen for listing available tables and selecting one to view.
+
+    Features:
+    - Lists in-memory tables from the current session
+    - Shows table names with row counts
+    - Selecting a table opens TablePreviewScreen
+    - Navigation back to main menu
+    """
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("escape", "back", "Back"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Vertical(id="menu-container"):
+            yield Label("View Tables", id="menu-title")
+            yield Static("Select a table to view", id="menu-status")
+            
+            # Table list will be populated dynamically
+            with Center(id="table-list-container"):
+                yield Static("Loading tables...", id="table-list-status")
+            
+            with Center():
+                yield Button("Back to Main Menu", id="back-btn", variant="primary")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Populate the table list on mount."""
+        self._populate_table_list()
+
+    def _populate_table_list(self) -> None:
+        """Populate the table list with available tables."""
+        tables = self.app.get_tables()
+        container = self.query_one("#table-list-container", Center)
+        status = self.query_one("#table-list-status", Static)
+
+        if not tables:
+            status.update("[yellow]No tables available. Fetch data first.[/]")
+            return
+
+        # Clear existing content and show table buttons
+        status.remove()
+        
+        for table_name, table_data in tables.items():
+            # Get row count from the table data
+            row_count = len(table_data) if hasattr(table_data, "__len__") else 0
+            button_label = f"{table_name} ({row_count} rows)"
+            container.mount(
+                Button(button_label, id=f"table-{table_name}", variant="default")
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        button_id = event.button.id
+
+        if button_id == "back-btn":
+            self.app.pop_screen()
+        elif button_id and button_id.startswith("table-"):
+            table_name = button_id[6:]  # Remove "table-" prefix
+            self._open_table(table_name)
+
+    def _open_table(self, table_name: str) -> None:
+        """Open a table in the preview screen.
+
+        Args:
+            table_name: Name of the table to open
+        """
+        tables = self.app.get_tables()
+        if table_name not in tables:
+            self.notify(f"Table '{table_name}' not found", severity="error")
+            return
+
+        table_data = tables[table_name]
+        self.app.push_screen(
+            TablePreviewScreen(table_name=table_name, data=table_data)
+        )
+
+    def action_back(self) -> None:
+        """Return to main menu."""
+        self.app.pop_screen()
