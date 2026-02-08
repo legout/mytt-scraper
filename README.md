@@ -218,6 +218,19 @@ Select players to fetch (comma-separated numbers, or 'all'): 1,3,5
 
 See [docs/USAGE.md](docs/USAGE.md) for detailed table schemas and field descriptions.
 
+## Documentation
+
+This project uses [Diátaxis](https://diataxis.fr/) documentation structure. Choose your path:
+
+| Section | Purpose |
+|---------|---------|
+| [Tutorials](docs/tutorials/index.md) | Learning-oriented — step-by-step lessons for beginners |
+| [How-To Guides](docs/how-to/index.md) | Task-oriented — solve specific problems |
+| [Reference](docs/reference/index.md) | Information-oriented — technical details and API docs |
+| [Explanation](docs/explanation/index.md) | Understanding-oriented — concepts and background |
+
+See the [docs/](docs/) folder for all documentation.
+
 ## In-Memory Table Extraction (Library Usage)
 
 For library consumers who want to work with data directly without CSV files:
