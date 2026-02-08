@@ -643,9 +643,7 @@ class SearchScreen(Screen):
             else:
                 return []
         except Exception as e:
-            self.app.call_from_thread(
-                self._update_status, f"[red]Search error: {e}[/]"
-            )
+            self._update_status(f"[red]Search error: {e}[/]")
             return []
 
     def _update_status(self, message: str) -> None:
