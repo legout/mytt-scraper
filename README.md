@@ -39,6 +39,74 @@ You'll be prompted for:
 2. Mode (1-5: own profile, external profile, multiple profiles, search, search & fetch)
 3. Whether to run in headed mode (shows browser window)
 
+## TUI (Textual User Interface)
+
+The project includes a modern Terminal UI built with [Textual](https://textual.textualize.io/) for a more interactive experience.
+
+### Running the TUI
+
+```bash
+# Run the TUI
+python -m mytt_scraper.tui
+
+# Or via uv
+uv run python -m mytt_scraper.tui
+```
+
+### TUI Features
+
+The TUI provides an interactive interface for all scraper features:
+
+#### 1. Login Screen
+- Enter your mytischtennis.de credentials
+- Login runs in background with progress indicators
+- Session-only authentication (credentials not stored)
+
+#### 2. Main Menu
+After login, choose from:
+- **Fetch My Profile** - Download your own community data
+- **Search Players** - Find players by name with live results
+- **Fetch by User ID** - Download data for a specific player
+
+#### 3. Player Search
+- Search by player name
+- Toggle between **API mode** (fast) or **Playwright mode** (reliable)
+- Multi-select players with checkboxes
+- Batch fetch selected players with progress tracking
+
+#### 4. Batch Fetch Progress
+- Real-time progress bar
+- Per-player status log
+- Success/failure statistics
+- Output files automatically saved to `tables/` directory
+
+### TUI vs CLI Scripts
+
+| Feature | TUI | CLI Scripts |
+|---------|-----|-------------|
+| Interface | Interactive terminal UI | Command-line prompts |
+| Browser Mode | Headless only | Headless or headed |
+| Multi-select | ✅ Visual checkboxes | Manual comma-separated IDs |
+| Progress | ✅ Real-time progress bar | Simple text output |
+| Best For | Interactive exploration | Automation/scripts |
+
+### Troubleshooting TUI
+
+**Login fails:**
+- Verify your credentials work on mytischtennis.de
+- Check your internet connection
+- Try the CLI script with headed mode to see any captcha issues
+
+**Search returns no results:**
+- Try switching between API and Playwright mode
+- Use simpler search terms (surname only)
+- Verify you're logged in (check menu status)
+
+**Batch fetch errors:**
+- Individual player failures are logged but don't stop the batch
+- Check the fetch log for specific error messages
+- Failed players can be retried by searching again
+
 ## Usage Modes
 
 ### Mode 1: Own Profile
