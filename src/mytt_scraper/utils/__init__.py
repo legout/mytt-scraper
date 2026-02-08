@@ -2,6 +2,19 @@
 
 from .helpers import parse_multipart_json
 from .in_memory_tables import extract_flat_tables
+from .query_executor import PolarsQueryExecutor, QueryExecutorError, ValidationError, create_executor
+from .query_model import (
+    AggFunc,
+    Aggregation,
+    Backend,
+    Filter,
+    FilterOp,
+    GroupBy,
+    Query,
+    Sort,
+    SortDirection,
+    TableSchema,
+)
 from .table_extractor import (
     extract_club_info_table,
     extract_league_table,
@@ -20,4 +33,20 @@ __all__ = [
     "extract_ttr_history_matches_table",
     "write_csv",
     "extract_flat_tables",
+    # Query model
+    "AggFunc",
+    "Aggregation",
+    "Backend",
+    "Filter",
+    "FilterOp",
+    "GroupBy",
+    "Query",
+    "Sort",
+    "SortDirection",
+    "TableSchema",
+    # Query executor
+    "PolarsQueryExecutor",
+    "QueryExecutorError",
+    "ValidationError",
+    "create_executor",
 ]
