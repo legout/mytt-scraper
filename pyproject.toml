@@ -1,0 +1,39 @@
+[project]
+name = "mytt-scraper"
+version = "0.1.0"
+description = "Python scraper for mytischtennis.de - fetch player data, TTR rankings, league tables, and match history"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.4.4",
+    "pandas>=3.0.0",
+    "playwright>=1.58.0",
+    "polars>=1.38.1",
+    "pyarrow>=23.0.0",
+    "requests>=2.32.5",
+    "textual>=0.85.0",
+]
+
+[project.scripts]
+mytt-scraper = "scripts.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ipython>=9.10.0",
+    "pytest>=8.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mytt_scraper"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/scripts",
+    "/examples",
+]
