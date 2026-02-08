@@ -16,7 +16,7 @@ How-to guides in this section are:
 
 - **[Search for Players](search-players.md)** — Find players by name or club
 - **[Fetch Multiple Players](fetch-multiple.md)** — Batch download data for several players
-- **[Fetch by User ID](fetch-by-user-id.md)** — Download data for a specific player
+- **[Fetch External Profile](fetch-external-profile.md)** — Download data for a specific player by user ID
 
 ### Working with Data
 
