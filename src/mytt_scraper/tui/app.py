@@ -1,5 +1,6 @@
 """Main Textual App for mytt-scraper TUI."""
 
+from pathlib import Path
 from typing import Any, Optional
 
 from textual.app import App
@@ -8,6 +9,7 @@ from textual.widgets import Footer, Header
 
 from ..scraper import MyTischtennisScraper
 from ..player_search import PlayerSearcher
+from ..utils.table_provider import TableProvider, TableInfo, TableSource, create_default_provider
 from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen, TablePreviewScreen, TableListScreen
 
 __all__ = ["MyttScraperApp"]
@@ -153,6 +155,18 @@ class MyttScraperApp(App):
         text-align: center;
         text-style: bold;
         margin-bottom: 1;
+    }
+
+    /* Table List Screen Styles */
+    #source-legend {
+        height: auto;
+        margin: 1 0;
+        align: center middle;
+    }
+
+    #source-legend-text {
+        color: $text-muted;
+        text-align: center;
     }
 
     #filter-panel {
@@ -400,3 +414,50 @@ class MyttScraperApp(App):
             True if tables exist, False otherwise
         """
         return len(self.tables) > 0
+    
+    def get_table_provider(self, tables_dir: str | Path = "tables") -> TableProvider:
+        """Get a TableProvider for discovering and accessing tables.
+        
+        Provides unified access to both in-memory (current session) and
+        disk-based (CSV files) tables with friendly display names.
+        
+        Args:
+            tables_dir: Path to the tables directory for disk-based tables
+            
+        Returns:
+            Configured TableProvider instance
+        """
+        provider = create_default_provider(
+            memory_tables=self.tables,
+            tables_dir=tables_dir,
+        )
+        return provider
+    
+    def discover_tables(self, include_disk: bool = True) -> list[TableInfo]:
+        """Discover all available tables from memory and disk.
+        
+        Args:
+            include_disk: Whether to include disk-based tables (default: True)
+            
+        Returns:
+            List of TableInfo objects with metadata for each table
+        """
+        provider = self.get_table_provider()
+        return provider.discover(include_disk=include_disk)
+    
+    def has_any_tables(self, include_disk: bool = True) -> bool:
+        """Check if any tables are available from any source.
+        
+        Args:
+            include_disk: Whether to check disk-based tables (default: True)
+            
+        Returns:
+            True if tables exist in memory or on disk
+        """
+        if self.has_tables():
+            return True
+        if include_disk:
+            provider = self.get_table_provider()
+            disk_tables = provider.discover(include_disk=True)
+            return any(t.source == TableSource.DISK for t in disk_tables)
+        return False

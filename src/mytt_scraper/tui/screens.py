@@ -22,6 +22,7 @@ from ..utils.query_executor import (
     PolarsQueryExecutor, DuckDBQueryExecutor,
     ValidationError, QueryExecutorError, UnsafeQueryError
 )
+from ..utils.table_provider import TableInfo, TableProvider, TableSource
 
 __all__ = [
     "LoginScreen", "MainMenuScreen", "SearchScreen",
@@ -262,7 +263,7 @@ class MainMenuScreen(Screen):
     def _update_view_tables_button(self) -> None:
         """Update the View Tables button state based on available tables."""
         view_tables_btn = self.query_one("#view-tables", Button)
-        view_tables_btn.disabled = not self.app.has_tables()
+        view_tables_btn.disabled = not self.app.has_any_tables(include_disk=True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle menu button presses."""
@@ -1926,7 +1927,9 @@ class TableListScreen(Screen):
 
     Features:
     - Lists in-memory tables from the current session
-    - Shows table names with row counts
+    - Lists disk-based tables from tables/ directory
+    - Shows friendly display names with source indicators
+    - Indicates source (memory vs disk) with icons
     - Selecting a table opens TablePreviewScreen
     - Navigation back to main menu
     """
@@ -1942,6 +1945,10 @@ class TableListScreen(Screen):
             yield Label("View Tables", id="menu-title")
             yield Static("Select a table to view", id="menu-status")
             
+            # Source legend
+            with Horizontal(id="source-legend"):
+                yield Static("🟢 In-memory  🔵 On disk", id="source-legend-text")
+            
             # Table list will be populated dynamically
             with Center(id="table-list-container"):
                 yield Static("Loading tables...", id="table-list-status")
@@ -1955,24 +1962,34 @@ class TableListScreen(Screen):
         self._populate_table_list()
 
     def _populate_table_list(self) -> None:
-        """Populate the table list with available tables."""
-        tables = self.app.get_tables()
+        """Populate the table list with available tables from all sources."""
         container = self.query_one("#table-list-container", Center)
         status = self.query_one("#table-list-status", Static)
-
-        if not tables:
+        
+        # Get table provider from app
+        provider = self.app.get_table_provider()
+        table_infos = provider.discover(include_disk=True)
+        
+        if not table_infos:
             status.update("[yellow]No tables available. Fetch data first.[/]")
             return
 
         # Clear existing content and show table buttons
         status.remove()
         
-        for table_name, table_data in tables.items():
-            # Get row count from the table data
-            row_count = len(table_data) if hasattr(table_data, "__len__") else 0
-            button_label = f"{table_name} ({row_count} rows)"
+        for info in table_infos:
+            # Build button label with source indicator
+            source_icon = "🟢" if info.source == TableSource.MEMORY else "🔵"
+            row_count_str = f"{info.row_count} rows" if info.row_count >= 0 else "unknown rows"
+            button_label = f"{source_icon} {info.display_name} ({row_count_str})"
+            
+            # Store the internal name for lookup when button is pressed
             container.mount(
-                Button(button_label, id=f"table-{table_name}", variant="default")
+                Button(
+                    button_label, 
+                    id=f"table-{info.name}", 
+                    variant="primary" if info.source == TableSource.MEMORY else "default"
+                )
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1991,15 +2008,26 @@ class TableListScreen(Screen):
         Args:
             table_name: Name of the table to open
         """
-        tables = self.app.get_tables()
-        if table_name not in tables:
+        # Get table provider and lookup the table
+        provider = self.app.get_table_provider()
+        result = provider.get_data(table_name)
+        
+        if result is None:
             self.notify(f"Table '{table_name}' not found", severity="error")
             return
-
-        table_data = tables[table_name]
-        self.app.push_screen(
-            TablePreviewScreen(table_name=table_name, data=table_data)
-        )
+        
+        data, source = result
+        
+        if source == TableSource.MEMORY:
+            # In-memory data - pass directly
+            self.app.push_screen(
+                TablePreviewScreen(table_name=table_name, data=data)
+            )
+        else:
+            # Disk data - data is a Path, pass as csv_path
+            self.app.push_screen(
+                TablePreviewScreen(table_name=table_name, csv_path=str(data))
+            )
 
     def action_back(self) -> None:
         """Return to main menu."""

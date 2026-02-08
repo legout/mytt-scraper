@@ -23,6 +23,14 @@ from .table_extractor import (
     extract_ttr_rankings_table,
     write_csv,
 )
+from .table_provider import (
+    DiskTableProvider,
+    InMemoryTableProvider,
+    TableInfo,
+    TableProvider,
+    TableSource,
+    create_default_provider,
+)
 
 __all__ = [
     "parse_multipart_json",
@@ -49,4 +57,11 @@ __all__ = [
     "QueryExecutorError",
     "ValidationError",
     "create_executor",
+    # Table provider
+    "DiskTableProvider",
+    "InMemoryTableProvider",
+    "TableInfo",
+    "TableProvider",
+    "TableSource",
+    "create_default_provider",
 ]
