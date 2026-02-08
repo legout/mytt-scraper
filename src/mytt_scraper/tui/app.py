@@ -1,8 +1,13 @@
 """Main Textual App for mytt-scraper TUI."""
 
+from typing import Optional
+
 from textual.app import App
+from textual.reactive import reactive
 from textual.widgets import Footer, Header
 
+from ..scraper import MyTischtennisScraper
+from ..player_search import PlayerSearcher
 from .screens import LoginScreen, MainMenuScreen, SearchScreen
 
 __all__ = ["MyttScraperApp"]
@@ -15,7 +20,13 @@ class MyttScraperApp(App):
     - Login (username/password)
     - Main menu (fetch profile, search, fetch by ID)
     - Search (find players by name)
+    
+    App state:
+    - scraper: Authenticated MyTischtennisScraper instance (session-only)
     """
+    
+    # Reactive state for authenticated scraper instance
+    scraper: reactive[Optional[MyTischtennisScraper]] = reactive(None)
 
     CSS = """
     #login-container, #menu-container, #search-container {
@@ -66,3 +77,51 @@ class MyttScraperApp(App):
     def action_toggle_dark(self) -> None:
         """Toggle dark mode."""
         self.dark = not self.dark
+    
+    def set_scraper(self, username: str, password: str, headless: bool = True) -> MyTischtennisScraper:
+        """Create and store an authenticated scraper instance.
+        
+        Args:
+            username: Email/username for login
+            password: Password for login
+            headless: Whether to run browser in headless mode
+            
+        Returns:
+            Configured MyTischtennisScraper instance
+        """
+        self.scraper = MyTischtennisScraper(username, password, headless=headless)
+        return self.scraper
+    
+    def set_searcher(self, username: str, password: str, headless: bool = True) -> PlayerSearcher:
+        """Create and store an authenticated PlayerSearcher instance.
+        
+        Args:
+            username: Email/username for login
+            password: Password for login
+            headless: Whether to run browser in headless mode
+            
+        Returns:
+            Configured PlayerSearcher instance
+        """
+        self.scraper = PlayerSearcher(username, password, headless=headless)
+        return self.scraper
+    
+    def clear_scraper(self) -> None:
+        """Clear the stored scraper instance (logout)."""
+        self.scraper = None
+    
+    def get_scraper(self) -> Optional[MyTischtennisScraper]:
+        """Get the current authenticated scraper instance.
+        
+        Returns:
+            The stored scraper instance, or None if not authenticated
+        """
+        return self.scraper
+    
+    def is_authenticated(self) -> bool:
+        """Check if a scraper instance is stored.
+        
+        Returns:
+            True if authenticated, False otherwise
+        """
+        return self.scraper is not None
