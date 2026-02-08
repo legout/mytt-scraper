@@ -80,6 +80,15 @@ After login, choose from:
 - Success/failure statistics
 - Output files automatically saved to `tables/` directory
 
+#### 5. Table Preview with Queries
+After fetching data, tables open in an interactive viewer where you can:
+- **Filter** rows by column values (equals, greater than, contains, etc.)
+- **Sort** by any column (ascending/descending)
+- **Group and aggregate** (count, sum, mean, min, max)
+- **Run SQL queries** using DuckDB (advanced mode)
+
+See [docs/TUI_TABLE_QUERIES.md](docs/TUI_TABLE_QUERIES.md) for complete query documentation.
+
 ### TUI vs CLI Scripts
 
 | Feature | TUI | CLI Scripts |
