@@ -14,6 +14,7 @@ Reference documentation in this section is:
 
 ### API and Usage
 
+- **[CLI Reference](cli.md)** — Command-line interface modes, prompts, and outputs
 - **[Table Schemas](table-schemas.md)** — Complete field descriptions for all CSV output tables
 - **[Python API](python-api.md)** — Library usage and class documentation
 - **[CLI Options](cli-options.md)** — Command-line arguments and environment variables
