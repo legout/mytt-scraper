@@ -930,15 +930,11 @@ class BatchFetchScreen(Screen):
         tables_dir = scraper.tables_dir if hasattr(scraper, 'tables_dir') else Path("tables")
 
         # Ensure logged in
-        self.app.call_from_thread(
-            self._log_message, "[yellow]🔐 Logging in...[/]"
-        )
+        self._log_message("[yellow]🔐 Logging in...[/]")
         
         try:
             if hasattr(scraper, 'login') and not scraper.login():
-                self.app.call_from_thread(
-                    self._log_message, "[red]❌ Login failed[/]"
-                )
+                self._log_message("[red]❌ Login failed[/]")
                 return {
                     "success": False,
                     "error": "Login failed",
@@ -946,9 +942,7 @@ class BatchFetchScreen(Screen):
                     "failure_count": len(self._players),
                 }
         except Exception as e:
-            self.app.call_from_thread(
-                self._log_message, f"[red]❌ Login error: {e}[/]"
-            )
+            self._log_message(f"[red]❌ Login error: {e}[/]")
             return {
                 "success": False,
                 "error": str(e),
@@ -956,30 +950,22 @@ class BatchFetchScreen(Screen):
                 "failure_count": len(self._players),
             }
 
-        self.app.call_from_thread(
-            self._log_message, "[green]✓ Logged in successfully[/]"
-        )
+        self._log_message("[green]✓ Logged in successfully[/]")
 
         # Fetch each player
         for i, player in enumerate(self._players, 1):
             if self._cancelled:
-                self.app.call_from_thread(
-                    self._log_message, "[yellow]⚠ Fetch cancelled by user[/]"
-                )
+                self._log_message("[yellow]⚠ Fetch cancelled by user[/]")
                 break
 
             user_id = player.get('user_id', player.get('personId', ''))
             name = self._get_player_name(player)
 
             # Update progress
-            self.app.call_from_thread(
-                self._update_progress, i - 1, name
-            )
+            self._update_progress(i - 1, name)
 
             # Log start
-            self.app.call_from_thread(
-                self._log_message, f"[{i}/{len(self._players)}] Fetching: [bold]{name}[/] ({user_id})"
-            )
+            self._log_message(f"[{i}/{len(self._players)}] Fetching: [bold]{name}[/] ({user_id})")
 
             try:
                 # Fetch the player
@@ -988,30 +974,26 @@ class BatchFetchScreen(Screen):
                     
                     if data:
                         success_count += 1
-                        self.app.call_from_thread(
-                            self._log_message, 
+                        self._log_message(
                             f"  [green]✓ Success[/] - Data fetched for {name}"
                         )
                     else:
                         failure_count += 1
                         failed_players.append((name, "No data returned"))
-                        self.app.call_from_thread(
-                            self._log_message, 
+                        self._log_message(
                             f"  [red]✗ Failed[/] - No data for {name}"
                         )
                 else:
                     failure_count += 1
                     failed_players.append((name, "Scraper doesn't support external profile"))
-                    self.app.call_from_thread(
-                        self._log_message, 
+                    self._log_message(
                         f"  [red]✗ Failed[/] - Scraper doesn't support external profile fetch"
                     )
 
             except Exception as e:
                 failure_count += 1
                 failed_players.append((name, str(e)))
-                self.app.call_from_thread(
-                    self._log_message, 
+                self._log_message(
                     f"  [red]✗ Error[/] - {name}: {e}"
                 )
 
@@ -1021,43 +1003,25 @@ class BatchFetchScreen(Screen):
                 await asyncio.sleep(0.5)
 
             # Update stats
-            self.app.call_from_thread(
-                self._update_stats, success_count, failure_count, 
-                len(self._players) - i
-            )
+            self._update_stats(success_count, failure_count, len(self._players) - i)
 
         # Complete progress bar
-        self.app.call_from_thread(
-            self._update_progress, 
-            success_count + failure_count, 
-            "Complete"
-        )
+        self._update_progress(success_count + failure_count, "Complete")
 
         # Log summary
-        self.app.call_from_thread(
-            self._log_message, 
-            f"\n[bold]{'='*50}[/]"
-        )
-        self.app.call_from_thread(
-            self._log_message,
+        self._log_message(f"\n[bold]{'='*50}[/]")
+        self._log_message(
             f"[bold]Batch Fetch Complete:[/] {success_count} success, {failure_count} failed"
         )
-        self.app.call_from_thread(
-            self._log_message,
-            f"[dim]Output directory: {tables_dir}[/dim]"
-        )
+        self._log_message(f"[dim]Output directory: {tables_dir}[/dim]")
 
         if failed_players:
-            self.app.call_from_thread(
-                self._log_message, "\n[red]Failed players:[/]"
-            )
+            self._log_message("\n[red]Failed players:[/]")
             for name, error in failed_players:
-                self.app.call_from_thread(
-                    self._log_message, f"  • [red]{name}[/]: {error}"
-                )
+                self._log_message(f"  • [red]{name}[/]: {error}")
 
         # Enable back button
-        self.app.call_from_thread(self._enable_back_button)
+        self._enable_back_button()
 
         return {
             "success": True,
