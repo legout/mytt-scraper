@@ -5,17 +5,38 @@
 - Status: RUNNING
 - Current ticket: (none)
 - Started: 2026-02-08T16:06:23Z
-- Last updated: 2026-02-08T18:05:41Z
+- Last updated: 2026-02-08T18:42:24Z
 
 ## Statistics
 
-- Tickets completed: 16
-- Tickets failed: 0
-- Total iterations: 16
+- Tickets completed: 20
+- Tickets failed: 1
+- Total iterations: 21
 
 ## History
 
 <!-- Auto-appended entries below -->
+- ms-fkf4: COMPLETE (2026-02-08T18:42:24Z)
+  - Summary: Implement table discovery (in-memory + disk) with friendly names
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-vcim: FAILED (2026-02-08T18:37:28Z)
+  - Summary: Add "View Tables" entry + TableListScreen navigation in Textual TUI
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: FAILED
+  - Error: pi -p failed (exit 1)
+- ms-f9r5: COMPLETE (2026-02-08T18:20:26Z)
+  - Summary: Document filters/queries usage and limitations
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-ekpx: COMPLETE (2026-02-08T18:17:07Z)
+  - Summary: Optional: DuckDB SQL mode for advanced queries (read-only)
+  - Issues: Critical(4)/Major(6)/Minor(6)
+  - Status: COMPLETE
+- ms-b2hw: COMPLETE (2026-02-08T18:09:48Z)
+  - Summary: Add Textual UI: sort (single column) + groupby aggregation (basic)
+  - Issues: Critical(0)/Major(0)/Minor(2)
+  - Status: COMPLETE
 - ms-ftgp: COMPLETE (2026-02-08T18:05:41Z)
   - Summary: Add Textual UI: filter panel + apply/reset actions
   - Issues: Critical(0)/Major(0)/Minor(2)
@@ -109,3 +130,12 @@
   - Summary: Add Textual UI sort + groupby aggregation to TablePreviewScreen
   - Issues: Critical(0)/Major(0)/Minor(2)
   - Status: COMPLETE
+- ms-fkf4: COMPLETE (2026-02-08T19:45:00+01:00)
+  - Summary: Implement table discovery (in-memory + disk) with friendly names
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-b7cc: COMPLETE (2026-02-08T19:43:00+01:00)
+  - Summary: Build TablePreviewScreen using Textual DataTable + Polars/PyArrow
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+

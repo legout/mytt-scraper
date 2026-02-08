@@ -1268,27 +1268,25 @@ class TablePreviewScreen(Screen):
     def __init__(
         self,
         table_name: str,
-        data: Any = None,
-        csv_path: str | None = None,
-        limit: int = 500,
+        provider: TableProvider,
+        limit: int = 200,
     ) -> None:
         """Initialize the table preview screen.
 
         Args:
-            table_name: Display name for the table
-            data: In-memory Polars DataFrame or PyArrow Table
-            csv_path: Path to CSV file (alternative to data)
-            limit: Maximum rows to display
+            table_name: Internal name of the table to preview
+            provider: TableProvider for accessing table data
+            limit: Maximum rows to display (default 200 for performance)
         """
         super().__init__()
         self.table_name = table_name
-        self.data = data
-        self.csv_path = csv_path
+        self.provider = provider
         self.limit = limit
         self._query_worker: Worker | None = None
         self._columns: list[str] = []
         self._dtypes: dict[str, str] = {}
         self._base_data: Any = None  # Store original data for reset
+        self._total_rows: int = 0  # Total row count for status display
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -1407,7 +1405,10 @@ class TablePreviewScreen(Screen):
         )
 
     async def _load_data(self) -> dict[str, Any]:
-        """Background worker to load initial data.
+        """Background worker to load initial data using TableProvider.
+
+        Uses lazy loading with .head() for disk-based tables to avoid
+        loading entire files into memory.
 
         Returns:
             Dictionary with columns, data, and status
@@ -1415,40 +1416,66 @@ class TablePreviewScreen(Screen):
         import polars as pl
 
         try:
-            if self.data is not None:
-                # Use in-memory data
-                if hasattr(self.data, "to_polars"):
-                    # PyArrow Table
-                    df = self.data.to_polars()
-                else:
-                    # Assume Polars DataFrame
-                    df = self.data
-            elif self.csv_path:
-                # Load from CSV
-                self.app.call_from_thread(
-                    self._update_status, f"[yellow]📂 Loading CSV: {self.csv_path}...[/]"
-                )
-                df = pl.read_csv(self.csv_path)
-            else:
-                return {"success": False, "error": "No data source provided"}
+            # Get table info for metadata
+            table_info = self.provider.get_table_info(self.table_name)
+            if table_info is None:
+                return {"success": False, "error": f"Table '{self.table_name}' not found"}
 
-            # Store base data for reset
-            self._base_data = df.clone()
+            # Get data from provider
+            result = self.provider.get_data(self.table_name)
+            if result is None:
+                return {"success": False, "error": f"No data available for '{self.table_name}'"}
+
+            data, source = result
+
+            if source == TableSource.MEMORY:
+                # In-memory data (Polars DataFrame or PyArrow Table)
+                self.app.call_from_thread(
+                    self._update_status, f"[yellow]📂 Loading {table_info.display_name}...[/]"
+                )
+                if hasattr(data, "to_polars"):
+                    # PyArrow Table - convert to Polars
+                    df = data.to_polars()
+                else:
+                    # Polars DataFrame
+                    df = data
+                # Store base data for reset
+                self._base_data = df.clone()
+
+            else:
+                # Disk-based: data is a Path - use lazy loading with .head()
+                csv_path = data
+                self.app.call_from_thread(
+                    self._update_status, f"[yellow]📂 Loading {table_info.display_name} (lazy)...[/]"
+                )
+                # Use lazy evaluation: scan CSV and only load first N rows
+                # This avoids loading the entire file into memory
+                lazy_df = pl.scan_csv(csv_path)
+                # Get total row count first (fast metadata operation)
+                self._total_rows = table_info.row_count if table_info.row_count >= 0 else 0
+                # Load only the first N rows for display
+                df = lazy_df.head(self.limit).collect()
+                # For reset functionality, we'd need to reload - store the path
+                self._base_data = csv_path  # Store path for re-loading
 
             # Get column info
             columns = df.columns
             dtypes = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
 
-            # Apply initial limit
-            if self.limit:
-                df = df.head(self.limit)
+            # Get total row count for memory tables
+            if source == TableSource.MEMORY:
+                self._total_rows = len(df) if hasattr(df, "__len__") else 0
+                # Apply limit for memory tables too
+                if self.limit and len(df) > self.limit:
+                    df = df.head(self.limit)
 
             return {
                 "success": True,
                 "columns": columns,
                 "dtypes": dtypes,
                 "df": df,
-                "row_count": len(self._base_data),
+                "row_count": self._total_rows,
+                "source": source,
             }
 
         except Exception as e:
@@ -1528,9 +1555,10 @@ class TablePreviewScreen(Screen):
                 if result and result.get("success"):
                     self._update_column_select(result["columns"], result["dtypes"])
                     self._populate_table(result["df"])
-                    row_count = result.get("row_count", 0)
+                    total_count = result.get("row_count", 0)
+                    displayed_count = len(result["df"]) if hasattr(result["df"], "__len__") else 0
                     self._update_status(
-                        f"[green]✓ Loaded {row_count} rows[/]"
+                        f"[green]✓ Showing {displayed_count:,} of {total_count:,} rows[/]"
                     )
                 else:
                     error = result.get("error", "Unknown error") if result else "Unknown error"
@@ -1739,10 +1767,18 @@ class TablePreviewScreen(Screen):
             Dictionary with result data and status
         """
         import polars as pl
+        from pathlib import Path
 
         try:
             if self._base_data is None:
                 return {"success": False, "error": "No data loaded"}
+
+            # Load data if disk-based (Path)
+            if isinstance(self._base_data, Path):
+                # For disk-based tables, load with limit first
+                base_df = pl.scan_csv(self._base_data).head(self.limit).collect()
+            else:
+                base_df = self._base_data
 
             # Build query
             filters = [filter_spec] if filter_spec else []
@@ -1757,13 +1793,13 @@ class TablePreviewScreen(Screen):
 
             # Execute query
             executor = PolarsQueryExecutor(validate=True)
-            result_df = executor.execute(self._base_data, query)
+            result_df = executor.execute(base_df, query)
 
             return {
                 "success": True,
                 "df": result_df,
                 "result_count": len(result_df),
-                "total_count": len(self._base_data),
+                "total_count": self._total_rows,
             }
 
         except ValidationError as e:
@@ -1776,6 +1812,7 @@ class TablePreviewScreen(Screen):
     def _reset_query(self) -> None:
         """Reset all query controls and show base preview."""
         import polars as pl
+        from pathlib import Path
 
         # Clear filter inputs
         value_input = self.query_one("#filter-value", Input)
@@ -1797,10 +1834,16 @@ class TablePreviewScreen(Screen):
 
         # Reset to base data
         if self._base_data is not None:
-            df = self._base_data.head(self.limit) if self.limit else self._base_data
+            if isinstance(self._base_data, Path):
+                # Disk-based: reload from CSV using lazy loading
+                lazy_df = pl.scan_csv(self._base_data)
+                df = lazy_df.head(self.limit).collect()
+            else:
+                # In-memory: use DataFrame directly
+                df = self._base_data.head(self.limit) if self.limit else self._base_data
             self._populate_table(df)
-            total_count = len(self._base_data)
-            self._update_status(f"[green]✓ Reset - showing {min(self.limit or total_count, total_count)} of {total_count} rows[/]")
+            displayed_count = len(df)
+            self._update_status(f"[green]✓ Reset - showing {displayed_count:,} of {self._total_rows:,} rows[/]")
 
     def action_back(self) -> None:
         """Return to previous screen."""
@@ -1886,16 +1929,20 @@ class TablePreviewScreen(Screen):
             Dictionary with result data and status
         """
         import polars as pl
+        from pathlib import Path
 
         try:
             executor = DuckDBQueryExecutor(validate=True, max_rows=self.limit or 1000)
 
             if self._base_data is not None:
-                # Query in-memory data
-                result_df = executor.execute_sql(self._base_data, sql, table_name="data")
-            elif self.csv_path:
-                # Query CSV file
-                result_df = executor.execute_sql_csv(self.csv_path, sql, table_name="data")
+                if isinstance(self._base_data, Path):
+                    # Disk-based: query CSV file directly
+                    result_df = executor.execute_sql_csv(
+                        str(self._base_data), sql, table_name="data"
+                    )
+                else:
+                    # In-memory data
+                    result_df = executor.execute_sql(self._base_data, sql, table_name="data")
             else:
                 return {"success": False, "error": "No data source available"}
 
@@ -1903,7 +1950,7 @@ class TablePreviewScreen(Screen):
                 "success": True,
                 "df": result_df,
                 "result_count": len(result_df),
-                "total_count": len(self._base_data) if self._base_data is not None else 0,
+                "total_count": self._total_rows,
             }
 
         except UnsafeQueryError as e:
@@ -2008,26 +2055,19 @@ class TableListScreen(Screen):
         Args:
             table_name: Name of the table to open
         """
-        # Get table provider and lookup the table
+        # Get table provider and pass it to TablePreviewScreen
+        # The preview screen will handle lazy loading via the provider
         provider = self.app.get_table_provider()
-        result = provider.get_data(table_name)
-        
-        if result is None:
+
+        # Verify table exists before opening
+        if not provider.has_table(table_name):
             self.notify(f"Table '{table_name}' not found", severity="error")
             return
-        
-        data, source = result
-        
-        if source == TableSource.MEMORY:
-            # In-memory data - pass directly
-            self.app.push_screen(
-                TablePreviewScreen(table_name=table_name, data=data)
-            )
-        else:
-            # Disk data - data is a Path, pass as csv_path
-            self.app.push_screen(
-                TablePreviewScreen(table_name=table_name, csv_path=str(data))
-            )
+
+        # Pass provider to TablePreviewScreen for lazy loading
+        self.app.push_screen(
+            TablePreviewScreen(table_name=table_name, provider=provider)
+        )
 
     def action_back(self) -> None:
         """Return to main menu."""
