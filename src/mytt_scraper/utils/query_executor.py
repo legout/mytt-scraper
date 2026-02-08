@@ -226,8 +226,29 @@ class PolarsQueryExecutor:
 
         Returns:
             Result DataFrame after applying query operations
+
+        Raises:
+            ValidationError: If query validation fails and validate=True
+            QueryExecutorError: If execution fails
         """
         import polars as pl
+
+        # Read header to build schema for validation
+        if self.validate and has_header:
+            from .query_model import TableSchema
+
+            try:
+                # Read just the header to get column names
+                header_df = pl.read_csv(csv_path, has_header=True, n_rows=0)
+                schema = TableSchema({col: str(dtype) for col, dtype in zip(header_df.columns, header_df.dtypes)})
+                is_valid, errors = query.validate(schema)
+                if not is_valid:
+                    raise ValidationError(f"Query validation failed: {'; '.join(errors)}")
+            except Exception as e:
+                if isinstance(e, ValidationError):
+                    raise
+                # If we can't read the file for validation, continue and let it fail during execution
+                pass
 
         # Scan CSV lazily
         lazy_df = pl.scan_csv(csv_path, has_header=has_header)

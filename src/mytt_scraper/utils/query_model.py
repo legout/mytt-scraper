@@ -254,8 +254,15 @@ class Query:
                 errors.append(f"Filter references unknown column: {f.column}")
 
         # Validate sort columns
+        # When groupby is present, sort can reference aggregation aliases
+        valid_sort_columns = set(schema.columns.keys())
+        if self.groupby:
+            # Add aggregation aliases as valid sort columns
+            for agg in self.groupby.aggregations:
+                valid_sort_columns.add(agg.alias)
+
         for s in self.sort:
-            if not schema.validate_column(s.column):
+            if s.column not in valid_sort_columns:
                 errors.append(f"Sort references unknown column: {s.column}")
 
         # Validate groupby columns and aggregations
