@@ -28,6 +28,10 @@ How-to guides in this section are:
 - **[Debug Login Issues](debug-login.md)** — Resolve authentication problems
 - **[Handle Captchas](handle-captchas.md)** — Deal with captcha challenges
 
+### Contributing
+
+- **[Contribute to Documentation](contribute-docs.md)** — Set up local preview, build docs, and follow style conventions
+
 ---
 
 > 📚 **Looking for something else?**

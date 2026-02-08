@@ -14,6 +14,7 @@ Contributing = "docs/contributing.md"
 "How-To Overview" = "docs/how-to/index.md"
 "Search for Players" = "docs/how-to/search-players.md"
 "Fetch External Profile" = "docs/how-to/fetch-external-profile.md"
+"Contribute to Documentation" = "docs/how-to/contribute-docs.md"
 
 [nav.Reference]
 "Reference Overview" = "docs/reference/index.md"
