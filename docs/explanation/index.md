@@ -14,12 +14,14 @@ Explanations in this section are:
 
 ### Architecture and Design
 
+- **[System Architecture](architecture.md)** — Playwright login → cookies → requests → extraction pipeline
 - **[How the Scraper Works](how-scraper-works.md)** — Overview of the scraping architecture
 - **[Authentication Flow](authentication-flow.md)** — How login and session management work
 - **[Why Playwright?](why-playwright.md)** — Rationale for using browser automation
 
 ### Data Understanding
 
+- **[In-Memory vs Disk Tables](in-memory-vs-disk-tables.md)** — Why in-memory first; CSV fallback; Polars/DuckDB
 - **[Understanding TTR Ratings](understanding-ttr.md)** — How the TTR system works
 - **[Table Relationships](table-relationships.md)** — How extracted tables relate to each other
 - **[Rate Limiting and Ethics](rate-limiting-ethics.md)** — Responsible data collection
