@@ -87,7 +87,9 @@ After fetching data, tables open in an interactive viewer where you can:
 - **Group and aggregate** (count, sum, mean, min, max)
 - **Run SQL queries** using DuckDB (advanced mode)
 
-See [docs/TUI_TABLE_QUERIES.md](docs/TUI_TABLE_QUERIES.md) for complete query documentation.
+See [docs/TUI_TABLE_VIEWER.md](docs/TUI_TABLE_VIEWER.md) for an overview of the table viewer including data sources and performance.
+
+See [docs/TUI_TABLE_QUERIES.md](docs/TUI_TABLE_QUERIES.md) for complete query documentation (filters, sorting, SQL).
 
 ### TUI vs CLI Scripts
 
@@ -371,6 +373,8 @@ mytt-scraper/
 │   ├── USAGE.md           # Table schemas
 │   ├── SEARCH_GUIDE.md    # Search documentation
 │   ├── SEARCH_FEATURE.md  # Search feature details
+│   ├── TUI_TABLE_VIEWER.md # Table viewer guide (data sources, performance)
+│   ├── TUI_TABLE_QUERIES.md # Table queries guide (filters, sorting, SQL)
 │   ├── COMPLETE_UPDATE.md
 │   └── UPDATE_SUMMARY.md
 │
