@@ -102,10 +102,8 @@ class LoginScreen(Screen):
         Returns:
             True if login successful, False otherwise
         """
-        # Update status via app call_from_thread for thread safety
-        self.app.call_from_thread(
-            self._update_status, "[yellow]🌐 Connecting to mytischtennis.de...[/]"
-        )
+        # Update status directly (async worker runs on main thread)
+        self._update_status("[yellow]🌐 Connecting to mytischtennis.de...[/]")
         
         try:
             # Run the async login function
@@ -113,9 +111,7 @@ class LoginScreen(Screen):
             return result
         except Exception as e:
             # Log error and return failure
-            self.app.call_from_thread(
-                self._update_status, f"[red]❌ Error during login: {e}[/]"
-            )
+            self._update_status(f"[red]❌ Error during login: {e}[/]")
             return False
     
     def _update_status(self, message: str) -> None:
@@ -305,33 +301,27 @@ class MainMenuScreen(Screen):
         Returns:
             Dictionary with success status and result info
         """
-        self.app.call_from_thread(
-            self._update_status, "[yellow]🌐 Logging in and fetching data...[/]"
-        )
+        self._update_status("[yellow]🌐 Logging in and fetching data...[/]")
 
         try:
             # Login first
             if not scraper.login():
                 return {"success": False, "error": "Login failed"}
 
-            self.app.call_from_thread(
-                self._update_status, "[yellow]🌐 Fetching data from server...[/]"
-            )
+            self._update_status("[yellow]🌐 Fetching data from server...[/]")
 
             # Fetch own profile data
             data, remaining = scraper.fetch_own_community()
 
             if data:
-                self.app.call_from_thread(
-                    self._update_status, "[yellow]📊 Extracting tables...[/]"
-                )
+                self._update_status("[yellow]📊 Extracting tables...[/]")
 
                 # Extract and save tables to CSV (existing behavior)
                 scraper.extract_and_save_tables(data, remaining)
 
                 # Extract in-memory tables and store in app state
                 tables = scraper.extract_flat_tables(data, remaining, backend="polars")
-                self.app.call_from_thread(self.app.set_tables, tables)
+                self.app.set_tables(tables)
 
                 # Get list of tables that were written
                 tables_dir = scraper.tables_dir
@@ -388,26 +378,20 @@ class MainMenuScreen(Screen):
         Returns:
             Dictionary with success status and result info
         """
-        self.app.call_from_thread(
-            self._update_status, "[yellow]🌐 Logging in and fetching data...[/]"
-        )
+        self._update_status("[yellow]🌐 Logging in and fetching data...[/]")
 
         try:
             # Login first
             if not scraper.login():
                 return {"success": False, "error": "Login failed"}
 
-            self.app.call_from_thread(
-                self._update_status, f"[yellow]🌐 Fetching profile for {user_id}...[/]"
-            )
+            self._update_status(f"[yellow]🌐 Fetching profile for {user_id}...[/]")
 
             # Fetch external profile data
             data, remaining = scraper.fetch_external_profile(user_id)
 
             if data:
-                self.app.call_from_thread(
-                    self._update_status, "[yellow]📊 Extracting tables...[/]"
-                )
+                self._update_status("[yellow]📊 Extracting tables...[/]")
 
                 # Extract and save tables to CSV (existing behavior)
                 prefix = f"{user_id}_"
@@ -415,7 +399,7 @@ class MainMenuScreen(Screen):
 
                 # Extract in-memory tables and store in app state
                 tables = scraper.extract_flat_tables(data, remaining, backend="polars")
-                self.app.call_from_thread(self.app.set_tables, tables)
+                self.app.set_tables(tables)
 
                 # Get list of tables that were written
                 tables_dir = scraper.tables_dir
