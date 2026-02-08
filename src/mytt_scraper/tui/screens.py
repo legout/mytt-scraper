@@ -13,7 +13,10 @@ from textual.widgets import (
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
-from ..utils.query_model import Filter, FilterOp, Query, Sort, SortDirection
+from ..utils.query_model import (
+    Filter, FilterOp, Query, Sort, SortDirection,
+    Aggregation, AggFunc, GroupBy
+)
 from ..utils.query_executor import PolarsQueryExecutor, ValidationError, QueryExecutorError
 
 __all__ = [
@@ -1214,8 +1217,8 @@ class TablePreviewScreen(Screen):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("escape", "back", "Back"),
-        ("r", "reset", "Reset Filter"),
-        ("a", "apply", "Apply Filter"),
+        ("r", "reset", "Reset All"),
+        ("a", "apply", "Apply Query"),
     ]
 
     def __init__(
@@ -1248,31 +1251,75 @@ class TablePreviewScreen(Screen):
         with Vertical(id="table-preview-container"):
             yield Label(f"Table: {self.table_name}", id="table-preview-title")
 
-            # Filter panel
-            with Horizontal(id="filter-panel"):
-                yield Label("Filter:", id="filter-label")
-                yield Select(
-                    options=[("Select column...", "")],
-                    id="filter-column",
-                    allow_blank=False,
-                )
-                yield Select(
-                    options=[
-                        ("=", "eq"),
-                        ("≠", "ne"),
-                        (">", "gt"),
-                        ("≥", "gte"),
-                        ("<", "lt"),
-                        ("≤", "lte"),
-                        ("contains", "contains"),
-                    ],
-                    id="filter-operator",
-                    allow_blank=False,
-                    value="eq",
-                )
-                yield Input(placeholder="Value", id="filter-value")
-                yield Button("Apply", id="apply-btn", variant="primary")
-                yield Button("Reset", id="reset-btn", variant="error")
+            # Query controls container
+            with Vertical(id="query-controls"):
+                # Filter panel
+                with Horizontal(id="filter-panel"):
+                    yield Label("Filter:", id="filter-label")
+                    yield Select(
+                        options=[("Select column...", "")],
+                        id="filter-column",
+                        allow_blank=False,
+                    )
+                    yield Select(
+                        options=[
+                            ("=", "eq"),
+                            ("≠", "ne"),
+                            (">", "gt"),
+                            ("≥", "gte"),
+                            ("<", "lt"),
+                            ("≤", "lte"),
+                            ("contains", "contains"),
+                        ],
+                        id="filter-operator",
+                        allow_blank=False,
+                        value="eq",
+                    )
+                    yield Input(placeholder="Value", id="filter-value")
+
+                # Sort panel
+                with Horizontal(id="sort-panel"):
+                    yield Label("Sort:", id="sort-label")
+                    yield Select(
+                        options=[("Select column...", "")],
+                        id="sort-column",
+                        allow_blank=False,
+                    )
+                    yield Select(
+                        options=[
+                            ("Ascending", "asc"),
+                            ("Descending", "desc"),
+                        ],
+                        id="sort-direction",
+                        allow_blank=False,
+                        value="asc",
+                    )
+
+                # Groupby panel
+                with Horizontal(id="groupby-panel"):
+                    yield Label("Group:", id="groupby-label")
+                    yield Select(
+                        options=[("Select column...", "")],
+                        id="groupby-column",
+                        allow_blank=False,
+                    )
+                    yield Select(
+                        options=[
+                            ("Count", "count"),
+                            ("Sum", "sum"),
+                            ("Mean", "mean"),
+                            ("Min", "min"),
+                            ("Max", "max"),
+                        ],
+                        id="groupby-agg",
+                        allow_blank=False,
+                        value="count",
+                    )
+
+                # Action buttons
+                with Horizontal(id="query-actions"):
+                    yield Button("Apply", id="apply-btn", variant="primary")
+                    yield Button("Reset", id="reset-btn", variant="error")
 
             # Status area
             yield Static("Loading...", id="filter-status")
@@ -1353,7 +1400,7 @@ class TablePreviewScreen(Screen):
         status.update(message)
 
     def _update_column_select(self, columns: list[str], dtypes: dict[str, str]) -> None:
-        """Update the column dropdown with available columns.
+        """Update the column dropdowns with available columns.
 
         Args:
             columns: List of column names
@@ -1362,11 +1409,26 @@ class TablePreviewScreen(Screen):
         self._columns = columns
         self._dtypes = dtypes
 
-        column_select = self.query_one("#filter-column", Select)
+        # Filter column dropdown
+        filter_select = self.query_one("#filter-column", Select)
         options = [(f"{col} ({dtypes.get(col, 'unknown')})", col) for col in columns]
-        column_select.set_options(options)
+        filter_select.set_options(options)
         if options:
-            column_select.value = options[0][1]
+            filter_select.value = options[0][1]
+
+        # Sort column dropdown
+        sort_select = self.query_one("#sort-column", Select)
+        sort_options = [(f"{col} ({dtypes.get(col, 'unknown')})", col) for col in columns]
+        sort_select.set_options(sort_options)
+        if sort_options:
+            sort_select.value = sort_options[0][1]
+
+        # Groupby column dropdown
+        groupby_select = self.query_one("#groupby-column", Select)
+        groupby_options = [(f"{col} ({dtypes.get(col, 'unknown')})", col) for col in columns]
+        groupby_select.set_options(groupby_options)
+        if groupby_options:
+            groupby_select.value = groupby_options[0][1]
 
     def _populate_table(self, df: Any) -> None:
         """Populate the DataTable with data.
@@ -1412,23 +1474,31 @@ class TablePreviewScreen(Screen):
             elif event.state == Worker.State.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._update_status(f"[red]❌ Error: {error_msg}[/]")
+            # Re-enable apply button after load completes
+            apply_btn = self.query_one("#apply-btn", Button)
+            apply_btn.disabled = False
+            apply_btn.label = "Apply"
 
-        elif event.worker.name == "filter_worker":
+        elif event.worker.name == "query_worker":
             if event.state == Worker.State.SUCCESS:
                 result = event.worker.result
                 if result and result.get("success"):
                     self._populate_table(result["df"])
-                    filtered_count = result.get("filtered_count", 0)
+                    result_count = result.get("result_count", 0)
                     total_count = result.get("total_count", 0)
                     self._update_status(
-                        f"[green]✓ Showing {filtered_count} of {total_count} rows[/]"
+                        f"[green]✓ Showing {result_count} of {total_count} rows[/]"
                     )
                 else:
                     error = result.get("error", "Unknown error") if result else "Unknown error"
-                    self._update_status(f"[red]❌ Filter error: {error}[/]")
+                    self._update_status(f"[red]❌ Query error: {error}[/]")
             elif event.state == Worker.State.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
-                self._update_status(f"[red]❌ Filter error: {error_msg}[/]")
+                self._update_status(f"[red]❌ Query error: {error_msg}[/]")
+            # Re-enable apply button
+            apply_btn = self.query_one("#apply-btn", Button)
+            apply_btn.disabled = False
+            apply_btn.label = "Apply"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses.
@@ -1437,9 +1507,9 @@ class TablePreviewScreen(Screen):
             event: Button press event
         """
         if event.button.id == "apply-btn":
-            self._apply_filter()
+            self._apply_query()
         elif event.button.id == "reset-btn":
-            self._reset_filter()
+            self._reset_query()
 
     def _get_filter_from_ui(self) -> Filter | None:
         """Build a Filter from the UI inputs.
@@ -1488,35 +1558,93 @@ class TablePreviewScreen(Screen):
 
         return Filter(column, op, value)
 
-    def _apply_filter(self) -> None:
-        """Apply the filter and refresh the table."""
+    def _get_sort_from_ui(self) -> Sort | None:
+        """Build a Sort from the UI inputs.
+
+        Returns:
+            Sort object or None if not selected
+        """
+        column_select = self.query_one("#sort-column", Select)
+        direction_select = self.query_one("#sort-direction", Select)
+
+        column = column_select.value
+        if not column:
+            return None
+
+        direction_str = direction_select.value or "asc"
+        direction = SortDirection.DESC if direction_str == "desc" else SortDirection.ASC
+
+        return Sort(column, direction)
+
+    def _get_groupby_from_ui(self) -> GroupBy | None:
+        """Build a GroupBy from the UI inputs.
+
+        Returns:
+            GroupBy object or None if not selected
+        """
+        column_select = self.query_one("#groupby-column", Select)
+        agg_select = self.query_one("#groupby-agg", Select)
+
+        column = column_select.value
+        if not column:
+            return None
+
+        agg_str = agg_select.value or "count"
+        agg_map = {
+            "count": AggFunc.COUNT,
+            "sum": AggFunc.SUM,
+            "mean": AggFunc.MEAN,
+            "min": AggFunc.MIN,
+            "max": AggFunc.MAX,
+        }
+        agg_func = agg_map.get(agg_str, AggFunc.COUNT)
+
+        # For count, use "*" as column; otherwise use selected column
+        agg_column = "*" if agg_func == AggFunc.COUNT else column
+
+        aggregation = Aggregation(agg_column, agg_func, alias=f"{agg_str}_{column}")
+        return GroupBy(columns=[column], aggregations=[aggregation])
+
+    def _apply_query(self) -> None:
+        """Apply filter, sort, and groupby, then refresh the table."""
+        # Get filter (optional - can be None)
         filter_spec = self._get_filter_from_ui()
-        if not filter_spec:
-            self._update_status("[red]❌ Please select a column and enter a value[/]")
-            return
+
+        # Get sort (optional)
+        sort_spec = self._get_sort_from_ui()
+
+        # Get groupby (optional)
+        groupby_spec = self._get_groupby_from_ui()
 
         # Disable apply button during query
         apply_btn = self.query_one("#apply-btn", Button)
         apply_btn.disabled = True
         apply_btn.label = "Applying..."
 
-        self._update_status("[yellow]🔄 Applying filter...[/]")
+        self._update_status("[yellow]🔄 Applying query...[/]")
 
-        # Run filter in background worker
+        # Run query in background worker
         self._query_worker = self.run_worker(
-            self._do_filter(filter_spec),
-            name="filter_worker",
-            description="Apply filter to table",
+            self._do_query(filter_spec, sort_spec, groupby_spec),
+            name="query_worker",
+            description="Apply query to table",
         )
 
-    async def _do_filter(self, filter_spec: Filter) -> dict[str, Any]:
-        """Background worker to apply filter.
+    async def _do_query(
+        self,
+        filter_spec: Filter | None,
+        sort_spec: Sort | None,
+        groupby_spec: GroupBy | None,
+    ) -> dict[str, Any]:
+        """Background worker to apply query operations.
 
         Args:
-            filter_spec: Filter specification
+            filter_spec: Optional filter specification
+            sort_spec: Optional sort specification
+            groupby_spec: Optional groupby specification
 
         Returns:
-            Dictionary with filtered data and status
+            Dictionary with result data and status
         """
         import polars as pl
 
@@ -1524,9 +1652,14 @@ class TablePreviewScreen(Screen):
             if self._base_data is None:
                 return {"success": False, "error": "No data loaded"}
 
-            # Build query with filter
+            # Build query
+            filters = [filter_spec] if filter_spec else []
+            sort = [sort_spec] if sort_spec else []
+
             query = Query(
-                filters=[filter_spec],
+                filters=filters,
+                sort=sort,
+                groupby=groupby_spec,
                 limit=self.limit,
             )
 
@@ -1537,7 +1670,7 @@ class TablePreviewScreen(Screen):
             return {
                 "success": True,
                 "df": result_df,
-                "filtered_count": len(result_df),
+                "result_count": len(result_df),
                 "total_count": len(self._base_data),
             }
 
@@ -1548,13 +1681,27 @@ class TablePreviewScreen(Screen):
         except Exception as e:
             return {"success": False, "error": f"Unexpected error: {e}"}
 
-    def _reset_filter(self) -> None:
-        """Reset the filter and show base preview."""
+    def _reset_query(self) -> None:
+        """Reset all query controls and show base preview."""
         import polars as pl
 
         # Clear filter inputs
         value_input = self.query_one("#filter-value", Input)
         value_input.value = ""
+
+        # Reset sort to first column, ascending
+        sort_column = self.query_one("#sort-column", Select)
+        if self._columns:
+            sort_column.value = self._columns[0]
+        sort_direction = self.query_one("#sort-direction", Select)
+        sort_direction.value = "asc"
+
+        # Reset groupby to first column, count
+        groupby_column = self.query_one("#groupby-column", Select)
+        if self._columns:
+            groupby_column.value = self._columns[0]
+        groupby_agg = self.query_one("#groupby-agg", Select)
+        groupby_agg.value = "count"
 
         # Reset to base data
         if self._base_data is not None:
@@ -1571,9 +1718,9 @@ class TablePreviewScreen(Screen):
         self.app.pop_screen()
 
     def action_reset(self) -> None:
-        """Reset filter action (key binding)."""
-        self._reset_filter()
+        """Reset query action (key binding)."""
+        self._reset_query()
 
     def action_apply(self) -> None:
-        """Apply filter action (key binding)."""
-        self._apply_filter()
+        """Apply query action (key binding)."""
+        self._apply_query()

@@ -5,17 +5,33 @@
 - Status: RUNNING
 - Current ticket: (none)
 - Started: 2026-02-08T16:06:23Z
-- Last updated: 2026-02-08T17:49:17Z
+- Last updated: 2026-02-08T18:05:41Z
 
 ## Statistics
 
-- Tickets completed: 12
+- Tickets completed: 16
 - Tickets failed: 0
-- Total iterations: 12
+- Total iterations: 16
 
 ## History
 
 <!-- Auto-appended entries below -->
+- ms-ftgp: COMPLETE (2026-02-08T18:05:41Z)
+  - Summary: Add Textual UI: filter panel + apply/reset actions
+  - Issues: Critical(0)/Major(0)/Minor(2)
+  - Status: COMPLETE
+- ms-0824: COMPLETE (2026-02-08T18:01:42Z)
+  - Summary: Implement Polars query executor (in-memory + scan_csv fallback)
+  - Issues: Critical(0)/Major(2)/Minor(1)
+  - Status: COMPLETE
+- ms-u70y: COMPLETE (2026-02-08T17:55:55Z)
+  - Summary: Design query model for table viewer (filters/sort/groupby)
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-08nr: COMPLETE (2026-02-08T17:49:56Z)
+  - Summary: Document how to run the Textual TUI
+  - Issues: Critical(0)/Major(0)/Minor(1)
+  - Status: COMPLETE
 - ms-j0ge: COMPLETE (2026-02-08T17:33:05Z)
   - Summary: Implement Search & Fetch flow with multi-select + progress screen
   - Issues: Critical(0)/Major(0)/Minor(0)
@@ -84,4 +100,12 @@
 - ms-08nr: COMPLETE (2026-02-08T18:49:21+01:00)
   - Summary: Document how to run the Textual TUI
   - Issues: Critical(0)/Major(0)/Minor(1)
+  - Status: COMPLETE
+- ms-0824: COMPLETE (2026-02-08T18:59:00+01:00)
+  - Summary: Implement Polars query executor (in-memory + scan_csv fallback)
+  - Issues: Critical(0)/Major(2)/Minor(1)
+  - Status: COMPLETE
+- ms-b2hw: COMPLETE (2026-02-08T19:07:00+01:00)
+  - Summary: Add Textual UI sort + groupby aggregation to TablePreviewScreen
+  - Issues: Critical(0)/Major(0)/Minor(2)
   - Status: COMPLETE
