@@ -8,7 +8,7 @@ from textual.widgets import Footer, Header
 
 from ..scraper import MyTischtennisScraper
 from ..player_search import PlayerSearcher
-from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen
+from .screens import LoginScreen, MainMenuScreen, SearchScreen, UserIdInputScreen, ResultScreen, BatchFetchScreen, TablePreviewScreen
 
 __all__ = ["MyttScraperApp"]
 
@@ -138,6 +138,65 @@ class MyttScraperApp(App):
         margin-bottom: 1;
     }
 
+    /* Table Preview Screen Styles */
+    #table-preview-container {
+        width: 100%;
+        height: 100%;
+        padding: 1 2;
+    }
+
+    #table-preview-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #filter-panel {
+        height: auto;
+        margin: 1 0;
+        align: left middle;
+    }
+
+    #filter-panel Label {
+        width: auto;
+        margin-right: 1;
+    }
+
+    #filter-column {
+        width: 30;
+        margin-right: 1;
+    }
+
+    #filter-operator {
+        width: 15;
+        margin-right: 1;
+    }
+
+    #filter-value {
+        width: 25;
+        margin-right: 1;
+    }
+
+    #apply-btn, #reset-btn {
+        width: auto;
+        margin: 0 1;
+    }
+
+    #filter-status {
+        height: auto;
+        margin: 1 0;
+        text-align: center;
+    }
+
+    #preview-table {
+        height: 1fr;
+        border: solid $primary;
+    }
+
+    #preview-table:focus {
+        border: solid $accent;
+    }
+
     #progress-section {
         height: auto;
         margin: 1 0;
@@ -208,6 +267,7 @@ class MyttScraperApp(App):
         "search": SearchScreen,
         "user_id_input": UserIdInputScreen,
         "result": ResultScreen,
+        "table_preview": TablePreviewScreen,
     }
 
     BINDINGS = [

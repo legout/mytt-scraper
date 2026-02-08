@@ -1,21 +1,25 @@
 """TUI Screens for mytt-scraper."""
 
 from pathlib import Path
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Center, Vertical, Horizontal
 from textual.screen import Screen, ModalScreen
 from textual.widgets import (
-    Button, Footer, Header, Input, Label, Static, DataTable, 
-    Switch, Checkbox, ProgressBar, RichLog
+    Button, Footer, Header, Input, Label, Static, DataTable,
+    Switch, Checkbox, ProgressBar, RichLog, Select
 )
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
+from ..utils.query_model import Filter, FilterOp, Query, Sort, SortDirection
+from ..utils.query_executor import PolarsQueryExecutor, ValidationError, QueryExecutorError
 
 __all__ = [
-    "LoginScreen", "MainMenuScreen", "SearchScreen", 
-    "UserIdInputScreen", "ResultScreen", "BatchFetchScreen"
+    "LoginScreen", "MainMenuScreen", "SearchScreen",
+    "UserIdInputScreen", "ResultScreen", "BatchFetchScreen",
+    "TablePreviewScreen"
 ]
 
 
@@ -1192,3 +1196,384 @@ class ResultScreen(ModalScreen[None]):
     def action_close(self) -> None:
         """Close the modal."""
         self.dismiss(None)
+
+
+class TablePreviewScreen(Screen):
+    """Screen for previewing a table with filter panel and apply/reset actions.
+
+    Features:
+    - DataTable display for tabular data
+    - Filter panel with column, operator, and value inputs
+    - Apply action runs query in background worker and refreshes DataTable
+    - Reset action clears query and shows base preview
+    - Validation errors shown in status area
+
+    Supports both in-memory Polars DataFrames and CSV files.
+    """
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("escape", "back", "Back"),
+        ("r", "reset", "Reset Filter"),
+        ("a", "apply", "Apply Filter"),
+    ]
+
+    def __init__(
+        self,
+        table_name: str,
+        data: Any = None,
+        csv_path: str | None = None,
+        limit: int = 500,
+    ) -> None:
+        """Initialize the table preview screen.
+
+        Args:
+            table_name: Display name for the table
+            data: In-memory Polars DataFrame or PyArrow Table
+            csv_path: Path to CSV file (alternative to data)
+            limit: Maximum rows to display
+        """
+        super().__init__()
+        self.table_name = table_name
+        self.data = data
+        self.csv_path = csv_path
+        self.limit = limit
+        self._query_worker: Worker | None = None
+        self._columns: list[str] = []
+        self._dtypes: dict[str, str] = {}
+        self._base_data: Any = None  # Store original data for reset
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Vertical(id="table-preview-container"):
+            yield Label(f"Table: {self.table_name}", id="table-preview-title")
+
+            # Filter panel
+            with Horizontal(id="filter-panel"):
+                yield Label("Filter:", id="filter-label")
+                yield Select(
+                    options=[("Select column...", "")],
+                    id="filter-column",
+                    allow_blank=False,
+                )
+                yield Select(
+                    options=[
+                        ("=", "eq"),
+                        ("≠", "ne"),
+                        (">", "gt"),
+                        ("≥", "gte"),
+                        ("<", "lt"),
+                        ("≤", "lte"),
+                        ("contains", "contains"),
+                    ],
+                    id="filter-operator",
+                    allow_blank=False,
+                    value="eq",
+                )
+                yield Input(placeholder="Value", id="filter-value")
+                yield Button("Apply", id="apply-btn", variant="primary")
+                yield Button("Reset", id="reset-btn", variant="error")
+
+            # Status area
+            yield Static("Loading...", id="filter-status")
+
+            # Data table
+            yield DataTable(id="preview-table")
+
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Initialize the table on mount."""
+        table = self.query_one("#preview-table", DataTable)
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+
+        # Load data in background worker
+        self._query_worker = self.run_worker(
+            self._load_data(),
+            name="load_data_worker",
+            description=f"Load table data for {self.table_name}",
+        )
+
+    async def _load_data(self) -> dict[str, Any]:
+        """Background worker to load initial data.
+
+        Returns:
+            Dictionary with columns, data, and status
+        """
+        import polars as pl
+
+        try:
+            if self.data is not None:
+                # Use in-memory data
+                if hasattr(self.data, "to_polars"):
+                    # PyArrow Table
+                    df = self.data.to_polars()
+                else:
+                    # Assume Polars DataFrame
+                    df = self.data
+            elif self.csv_path:
+                # Load from CSV
+                self.app.call_from_thread(
+                    self._update_status, f"[yellow]📂 Loading CSV: {self.csv_path}...[/]"
+                )
+                df = pl.read_csv(self.csv_path)
+            else:
+                return {"success": False, "error": "No data source provided"}
+
+            # Store base data for reset
+            self._base_data = df.clone()
+
+            # Get column info
+            columns = df.columns
+            dtypes = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
+
+            # Apply initial limit
+            if self.limit:
+                df = df.head(self.limit)
+
+            return {
+                "success": True,
+                "columns": columns,
+                "dtypes": dtypes,
+                "df": df,
+                "row_count": len(self._base_data),
+            }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _update_status(self, message: str) -> None:
+        """Update the status display.
+
+        Args:
+            message: Status message to display
+        """
+        status = self.query_one("#filter-status", Static)
+        status.update(message)
+
+    def _update_column_select(self, columns: list[str], dtypes: dict[str, str]) -> None:
+        """Update the column dropdown with available columns.
+
+        Args:
+            columns: List of column names
+            dtypes: Dictionary mapping column names to types
+        """
+        self._columns = columns
+        self._dtypes = dtypes
+
+        column_select = self.query_one("#filter-column", Select)
+        options = [(f"{col} ({dtypes.get(col, 'unknown')})", col) for col in columns]
+        column_select.set_options(options)
+        if options:
+            column_select.value = options[0][1]
+
+    def _populate_table(self, df: Any) -> None:
+        """Populate the DataTable with data.
+
+        Args:
+            df: Polars DataFrame
+        """
+        import polars as pl
+
+        table = self.query_one("#preview-table", DataTable)
+        table.clear(columns=True)
+
+        # Add columns
+        columns = df.columns
+        table.add_columns(*columns)
+
+        # Add rows (convert to list of lists for DataTable)
+        rows = df.rows()
+        for row in rows:
+            # Convert each value to string for display
+            str_row = [str(v) if v is not None else "" for v in row]
+            table.add_row(*str_row)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Handle worker state changes.
+
+        Args:
+            event: Worker state change event
+        """
+        if event.worker.name == "load_data_worker":
+            if event.state == Worker.State.SUCCESS:
+                result = event.worker.result
+                if result and result.get("success"):
+                    self._update_column_select(result["columns"], result["dtypes"])
+                    self._populate_table(result["df"])
+                    row_count = result.get("row_count", 0)
+                    self._update_status(
+                        f"[green]✓ Loaded {row_count} rows[/]"
+                    )
+                else:
+                    error = result.get("error", "Unknown error") if result else "Unknown error"
+                    self._update_status(f"[red]❌ Error: {error}[/]")
+            elif event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._update_status(f"[red]❌ Error: {error_msg}[/]")
+
+        elif event.worker.name == "filter_worker":
+            if event.state == Worker.State.SUCCESS:
+                result = event.worker.result
+                if result and result.get("success"):
+                    self._populate_table(result["df"])
+                    filtered_count = result.get("filtered_count", 0)
+                    total_count = result.get("total_count", 0)
+                    self._update_status(
+                        f"[green]✓ Showing {filtered_count} of {total_count} rows[/]"
+                    )
+                else:
+                    error = result.get("error", "Unknown error") if result else "Unknown error"
+                    self._update_status(f"[red]❌ Filter error: {error}[/]")
+            elif event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._update_status(f"[red]❌ Filter error: {error_msg}[/]")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses.
+
+        Args:
+            event: Button press event
+        """
+        if event.button.id == "apply-btn":
+            self._apply_filter()
+        elif event.button.id == "reset-btn":
+            self._reset_filter()
+
+    def _get_filter_from_ui(self) -> Filter | None:
+        """Build a Filter from the UI inputs.
+
+        Returns:
+            Filter object or None if invalid
+        """
+        column_select = self.query_one("#filter-column", Select)
+        operator_select = self.query_one("#filter-operator", Select)
+        value_input = self.query_one("#filter-value", Input)
+
+        column = column_select.value
+        if not column:
+            return None
+
+        op_str = operator_select.value or "eq"
+        op_map = {
+            "eq": FilterOp.EQ,
+            "ne": FilterOp.NE,
+            "gt": FilterOp.GT,
+            "gte": FilterOp.GTE,
+            "lt": FilterOp.LT,
+            "lte": FilterOp.LTE,
+            "contains": FilterOp.CONTAINS,
+        }
+        op = op_map.get(op_str, FilterOp.EQ)
+
+        value = value_input.value.strip()
+        if not value and op not in (FilterOp.IS_NULL, FilterOp.IS_NOT_NULL):
+            return None
+
+        # Try to convert value based on column type
+        dtype = self._dtypes.get(column, "").lower()
+        if "int" in dtype:
+            try:
+                value = int(value)
+            except ValueError:
+                self._update_status(f"[red]❌ Invalid integer: {value}[/]")
+                return None
+        elif "float" in dtype or "double" in dtype:
+            try:
+                value = float(value)
+            except ValueError:
+                self._update_status(f"[red]❌ Invalid number: {value}[/]")
+                return None
+
+        return Filter(column, op, value)
+
+    def _apply_filter(self) -> None:
+        """Apply the filter and refresh the table."""
+        filter_spec = self._get_filter_from_ui()
+        if not filter_spec:
+            self._update_status("[red]❌ Please select a column and enter a value[/]")
+            return
+
+        # Disable apply button during query
+        apply_btn = self.query_one("#apply-btn", Button)
+        apply_btn.disabled = True
+        apply_btn.label = "Applying..."
+
+        self._update_status("[yellow]🔄 Applying filter...[/]")
+
+        # Run filter in background worker
+        self._query_worker = self.run_worker(
+            self._do_filter(filter_spec),
+            name="filter_worker",
+            description="Apply filter to table",
+        )
+
+    async def _do_filter(self, filter_spec: Filter) -> dict[str, Any]:
+        """Background worker to apply filter.
+
+        Args:
+            filter_spec: Filter specification
+
+        Returns:
+            Dictionary with filtered data and status
+        """
+        import polars as pl
+
+        try:
+            if self._base_data is None:
+                return {"success": False, "error": "No data loaded"}
+
+            # Build query with filter
+            query = Query(
+                filters=[filter_spec],
+                limit=self.limit,
+            )
+
+            # Execute query
+            executor = PolarsQueryExecutor(validate=True)
+            result_df = executor.execute(self._base_data, query)
+
+            return {
+                "success": True,
+                "df": result_df,
+                "filtered_count": len(result_df),
+                "total_count": len(self._base_data),
+            }
+
+        except ValidationError as e:
+            return {"success": False, "error": str(e)}
+        except QueryExecutorError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Unexpected error: {e}"}
+
+    def _reset_filter(self) -> None:
+        """Reset the filter and show base preview."""
+        import polars as pl
+
+        # Clear filter inputs
+        value_input = self.query_one("#filter-value", Input)
+        value_input.value = ""
+
+        # Reset to base data
+        if self._base_data is not None:
+            df = self._base_data.head(self.limit) if self.limit else self._base_data
+            self._populate_table(df)
+            total_count = len(self._base_data)
+            self._update_status(f"[green]✓ Reset - showing {min(self.limit or total_count, total_count)} of {total_count} rows[/]")
+
+    def action_back(self) -> None:
+        """Return to previous screen."""
+        # Cancel any running worker
+        if self._query_worker and self._query_worker.is_running:
+            self._query_worker.cancel()
+        self.app.pop_screen()
+
+    def action_reset(self) -> None:
+        """Reset filter action (key binding)."""
+        self._reset_filter()
+
+    def action_apply(self) -> None:
+        """Apply filter action (key binding)."""
+        self._apply_filter()
