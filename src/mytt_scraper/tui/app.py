@@ -197,6 +197,40 @@ class MyttScraperApp(App):
         border: solid $accent;
     }
 
+    /* SQL Query Mode Styles */
+    #query-mode-toggle {
+        height: auto;
+        margin: 1 0;
+        align: left middle;
+    }
+
+    #query-mode-toggle Label {
+        width: auto;
+        margin-right: 1;
+    }
+
+    #mode-label {
+        width: auto;
+        margin-left: 1;
+        color: $text-muted;
+    }
+
+    #sql-input-container {
+        height: auto;
+        margin: 1 0;
+    }
+
+    #sql-input {
+        height: 6;
+        border: solid $primary;
+    }
+
+    #sql-actions {
+        height: auto;
+        margin: 1 0;
+        align: center middle;
+    }
+
     #progress-section {
         height: auto;
         margin: 1 0;

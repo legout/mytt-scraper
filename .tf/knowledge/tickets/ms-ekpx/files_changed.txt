@@ -1,0 +1,3 @@
+src/mytt_scraper/utils/query_executor.py
+src/mytt_scraper/tui/screens.py
+src/mytt_scraper/tui/app.py

@@ -1,10 +1,11 @@
 """Query executor for executing Query models against different backends.
 
-Provides executors for Polars (MVP) and optionally DuckDB later.
+Provides executors for Polars (MVP) and DuckDB SQL.
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 from .query_model import AggFunc, FilterOp, Query, SortDirection
@@ -21,6 +22,12 @@ class QueryExecutorError(Exception):
 
 class ValidationError(QueryExecutorError):
     """Raised when query validation fails."""
+
+    pass
+
+
+class UnsafeQueryError(ValidationError):
+    """Raised when a SQL query is deemed unsafe (non-SELECT)."""
 
     pass
 
@@ -275,11 +282,176 @@ class PolarsQueryExecutor:
             raise QueryExecutorError(f"CSV query execution failed: {e}") from e
 
 
-def create_executor(backend: str = "polars", **kwargs: Any) -> PolarsQueryExecutor:
+class DuckDBQueryExecutor:
+    """Execute SQL queries against data using DuckDB.
+
+    Supports both in-memory tables (Polars/PyArrow) and CSV files.
+    Only allows SELECT queries for safety (read-only mode).
+
+    Examples:
+        >>> import polars as pl
+        >>> from mytt_scraper.utils.query_executor import DuckDBQueryExecutor
+        >>>
+        >>> df = pl.DataFrame({"name": ["Alice", "Bob"], "ttr": [1500, 1600]})
+        >>> executor = DuckDBQueryExecutor()
+        >>> result = executor.execute_sql(df, "SELECT * FROM data WHERE ttr > 1550")
+    """
+
+    # Regex to detect unsafe SQL statements (basic guard)
+    # Matches INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, etc. at word boundaries
+    _UNSAFE_PATTERN = re.compile(
+        r"^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|REPLACE|MERGE|UPSERT|ATTACH|DETACH|COPY|EXPORT|IMPORT|LOAD|INSTALL)",
+        re.IGNORECASE,
+    )
+
+    def __init__(self, validate: bool = True, max_rows: int = 1000) -> None:
+        """Initialize the executor.
+
+        Args:
+            validate: Whether to validate queries before execution
+            max_rows: Maximum rows to return (safety limit)
+        """
+        self.validate = validate
+        self.max_rows = max_rows
+
+    def _validate_select_only(self, sql: str) -> None:
+        """Validate that the SQL query is a SELECT statement.
+
+        Args:
+            sql: SQL query string
+
+        Raises:
+            UnsafeQueryError: If query contains non-SELECT statements
+        """
+        # Check for unsafe keywords at the start
+        if self._UNSAFE_PATTERN.match(sql):
+            raise UnsafeQueryError(
+                "Only SELECT queries are allowed. "
+                "Found unsafe SQL statement."
+            )
+
+        # Additional check: must start with SELECT (allowing for whitespace and comments)
+        # Remove C-style comments first
+        cleaned = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+        # Remove line comments
+        cleaned = re.sub(r"--.*?$", "", cleaned, flags=re.MULTILINE)
+        # Check if starts with SELECT
+        if not re.match(r"^\s*SELECT\s", cleaned, re.IGNORECASE):
+            raise UnsafeQueryError(
+                "Only SELECT queries are allowed. Query must start with SELECT."
+            )
+
+    def execute_sql(
+        self, data: pl.DataFrame | Any, sql: str, table_name: str = "data"
+    ) -> pl.DataFrame:
+        """Execute a SQL query against in-memory data.
+
+        Args:
+            data: Polars DataFrame or PyArrow Table to query
+            sql: SQL query string (SELECT only)
+            table_name: Name to register the data as in DuckDB
+
+        Returns:
+            Result DataFrame
+
+        Raises:
+            UnsafeQueryError: If query is not a SELECT statement
+            QueryExecutorError: If execution fails
+        """
+        import duckdb
+        import polars as pl
+
+        if self.validate:
+            self._validate_select_only(sql)
+
+        con = None
+        try:
+            # Create a connection
+            con = duckdb.connect(":memory:")
+
+            # Register the data
+            if hasattr(data, "to_arrow"):
+                # Polars DataFrame - convert to Arrow for DuckDB
+                arrow_data = data.to_arrow()
+                con.register(table_name, arrow_data)
+            elif hasattr(data, "schema") and hasattr(data, "column_names"):
+                # PyArrow Table
+                con.register(table_name, data)
+            else:
+                # Assume it's already something DuckDB can handle
+                con.register(table_name, data)
+
+            # Execute query with row limit
+            limited_sql = f"SELECT * FROM ({sql}) LIMIT {self.max_rows}"
+            result = con.execute(limited_sql).fetch_arrow_table()
+
+            # Convert back to Polars
+            return pl.from_arrow(result)
+
+        except UnsafeQueryError:
+            raise
+        except Exception as e:
+            raise QueryExecutorError(f"SQL execution failed: {e}") from e
+        finally:
+            if con is not None:
+                con.close()
+
+    def execute_sql_csv(
+        self, csv_path: str, sql: str, table_name: str = "data"
+    ) -> pl.DataFrame:
+        """Execute a SQL query against a CSV file.
+
+        Uses DuckDB's native CSV reading capabilities.
+
+        Args:
+            csv_path: Path to CSV file
+            sql: SQL query string (SELECT only)
+            table_name: Name to use for the CSV table in the query
+
+        Returns:
+            Result DataFrame
+
+        Raises:
+            UnsafeQueryError: If query is not a SELECT statement
+            QueryExecutorError: If execution fails
+        """
+        import duckdb
+        import polars as pl
+
+        if self.validate:
+            self._validate_select_only(sql)
+
+        con = None
+        try:
+            # Create a connection
+            con = duckdb.connect(":memory:")
+
+            # Create a view for the CSV file
+            # Escape single quotes in path to prevent SQL injection
+            safe_csv_path = csv_path.replace("'", "''")
+            con.execute(f"CREATE VIEW {table_name} AS SELECT * FROM read_csv_auto('{safe_csv_path}')")
+
+            # Execute query with row limit
+            limited_sql = f"SELECT * FROM ({sql}) LIMIT {self.max_rows}"
+            result = con.execute(limited_sql).fetch_arrow_table()
+
+            # Convert back to Polars
+            return pl.from_arrow(result)
+
+        except UnsafeQueryError:
+            raise
+        except Exception as e:
+            raise QueryExecutorError(f"SQL execution failed: {e}") from e
+        finally:
+            if con is not None:
+                con.close()
+
+
+def create_executor(backend: str = "polars", **kwargs: Any) -> PolarsQueryExecutor | DuckDBQueryExecutor:
     """Factory function to create a query executor.
 
     Args:
-        backend: Backend type (currently only "polars" supported)
+        backend: Backend type ("polars" or "duckdb")
         **kwargs: Additional arguments passed to executor constructor
 
     Returns:
@@ -290,5 +462,7 @@ def create_executor(backend: str = "polars", **kwargs: Any) -> PolarsQueryExecut
     """
     if backend == "polars":
         return PolarsQueryExecutor(**kwargs)
+    elif backend == "duckdb":
+        return DuckDBQueryExecutor(**kwargs)
     else:
-        raise ValueError(f"Unsupported backend: {backend!r}. Use 'polars'.")
+        raise ValueError(f"Unsupported backend: {backend!r}. Use 'polars' or 'duckdb'.")

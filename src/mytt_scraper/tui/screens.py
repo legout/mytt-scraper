@@ -8,8 +8,9 @@ from textual.containers import Center, Vertical, Horizontal
 from textual.screen import Screen, ModalScreen
 from textual.widgets import (
     Button, Footer, Header, Input, Label, Static, DataTable,
-    Switch, Checkbox, ProgressBar, RichLog, Select
+    Switch, Checkbox, ProgressBar, RichLog, Select, TextArea
 )
+from textual.reactive import reactive
 from textual.worker import Worker
 
 from ..utils.auth import login_with_playwright
@@ -17,7 +18,10 @@ from ..utils.query_model import (
     Filter, FilterOp, Query, Sort, SortDirection,
     Aggregation, AggFunc, GroupBy
 )
-from ..utils.query_executor import PolarsQueryExecutor, ValidationError, QueryExecutorError
+from ..utils.query_executor import (
+    PolarsQueryExecutor, DuckDBQueryExecutor,
+    ValidationError, QueryExecutorError, UnsafeQueryError
+)
 
 __all__ = [
     "LoginScreen", "MainMenuScreen", "SearchScreen",
@@ -1207,6 +1211,7 @@ class TablePreviewScreen(Screen):
     Features:
     - DataTable display for tabular data
     - Filter panel with column, operator, and value inputs
+    - SQL mode for advanced DuckDB queries
     - Apply action runs query in background worker and refreshes DataTable
     - Reset action clears query and shows base preview
     - Validation errors shown in status area
@@ -1220,6 +1225,9 @@ class TablePreviewScreen(Screen):
         ("r", "reset", "Reset All"),
         ("a", "apply", "Apply Query"),
     ]
+
+    # Reactive state for query mode (False = Builder, True = SQL)
+    sql_mode: reactive[bool] = reactive(False)
 
     def __init__(
         self,
@@ -1251,75 +1259,95 @@ class TablePreviewScreen(Screen):
         with Vertical(id="table-preview-container"):
             yield Label(f"Table: {self.table_name}", id="table-preview-title")
 
+            # Query mode toggle
+            with Horizontal(id="query-mode-toggle"):
+                yield Label("Mode:")
+                yield Switch(id="sql-mode-switch", value=False)
+                yield Static("Builder", id="mode-label")
+
             # Query controls container
             with Vertical(id="query-controls"):
-                # Filter panel
-                with Horizontal(id="filter-panel"):
-                    yield Label("Filter:", id="filter-label")
-                    yield Select(
-                        options=[("Select column...", "")],
-                        id="filter-column",
-                        allow_blank=False,
-                    )
-                    yield Select(
-                        options=[
-                            ("=", "eq"),
-                            ("≠", "ne"),
-                            (">", "gt"),
-                            ("≥", "gte"),
-                            ("<", "lt"),
-                            ("≤", "lte"),
-                            ("contains", "contains"),
-                        ],
-                        id="filter-operator",
-                        allow_blank=False,
-                        value="eq",
-                    )
-                    yield Input(placeholder="Value", id="filter-value")
+                # Builder mode controls (filter, sort, groupby)
+                with Vertical(id="builder-controls"):
+                    # Filter panel
+                    with Horizontal(id="filter-panel"):
+                        yield Label("Filter:", id="filter-label")
+                        yield Select(
+                            options=[("Select column...", "")],
+                            id="filter-column",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            options=[
+                                ("=", "eq"),
+                                ("≠", "ne"),
+                                (">", "gt"),
+                                ("≥", "gte"),
+                                ("<", "lt"),
+                                ("≤", "lte"),
+                                ("contains", "contains"),
+                            ],
+                            id="filter-operator",
+                            allow_blank=False,
+                            value="eq",
+                        )
+                        yield Input(placeholder="Value", id="filter-value")
 
-                # Sort panel
-                with Horizontal(id="sort-panel"):
-                    yield Label("Sort:", id="sort-label")
-                    yield Select(
-                        options=[("Select column...", "")],
-                        id="sort-column",
-                        allow_blank=False,
-                    )
-                    yield Select(
-                        options=[
-                            ("Ascending", "asc"),
-                            ("Descending", "desc"),
-                        ],
-                        id="sort-direction",
-                        allow_blank=False,
-                        value="asc",
-                    )
+                    # Sort panel
+                    with Horizontal(id="sort-panel"):
+                        yield Label("Sort:", id="sort-label")
+                        yield Select(
+                            options=[("Select column...", "")],
+                            id="sort-column",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            options=[
+                                ("Ascending", "asc"),
+                                ("Descending", "desc"),
+                            ],
+                            id="sort-direction",
+                            allow_blank=False,
+                            value="asc",
+                        )
 
-                # Groupby panel
-                with Horizontal(id="groupby-panel"):
-                    yield Label("Group:", id="groupby-label")
-                    yield Select(
-                        options=[("Select column...", "")],
-                        id="groupby-column",
-                        allow_blank=False,
-                    )
-                    yield Select(
-                        options=[
-                            ("Count", "count"),
-                            ("Sum", "sum"),
-                            ("Mean", "mean"),
-                            ("Min", "min"),
-                            ("Max", "max"),
-                        ],
-                        id="groupby-agg",
-                        allow_blank=False,
-                        value="count",
-                    )
+                    # Groupby panel
+                    with Horizontal(id="groupby-panel"):
+                        yield Label("Group:", id="groupby-label")
+                        yield Select(
+                            options=[("Select column...", "")],
+                            id="groupby-column",
+                            allow_blank=False,
+                        )
+                        yield Select(
+                            options=[
+                                ("Count", "count"),
+                                ("Sum", "sum"),
+                                ("Mean", "mean"),
+                                ("Min", "min"),
+                                ("Max", "max"),
+                            ],
+                            id="groupby-agg",
+                            allow_blank=False,
+                            value="count",
+                        )
 
-                # Action buttons
-                with Horizontal(id="query-actions"):
-                    yield Button("Apply", id="apply-btn", variant="primary")
-                    yield Button("Reset", id="reset-btn", variant="error")
+                    # Action buttons
+                    with Horizontal(id="query-actions"):
+                        yield Button("Apply", id="apply-btn", variant="primary")
+                        yield Button("Reset", id="reset-btn", variant="error")
+
+                # SQL mode controls (hidden by default)
+                with Vertical(id="sql-controls"):
+                    with Vertical(id="sql-input-container"):
+                        yield TextArea(
+                            "SELECT * FROM data LIMIT 100",
+                            id="sql-input",
+                            language="sql",
+                        )
+                    with Horizontal(id="sql-actions"):
+                        yield Button("Run SQL", id="run-sql-btn", variant="primary")
+                        yield Button("Reset SQL", id="reset-sql-btn", variant="error")
 
             # Status area
             yield Static("Loading...", id="filter-status")
@@ -1500,14 +1528,42 @@ class TablePreviewScreen(Screen):
             apply_btn.disabled = False
             apply_btn.label = "Apply"
 
+        elif event.worker.name == "sql_query_worker":
+            if event.state == Worker.State.SUCCESS:
+                result = event.worker.result
+                if result and result.get("success"):
+                    self._populate_table(result["df"])
+                    result_count = result.get("result_count", 0)
+                    total_count = result.get("total_count", 0)
+                    self._update_status(
+                        f"[green]✓ SQL returned {result_count} rows[/]"
+                    )
+                else:
+                    error = result.get("error", "Unknown error") if result else "Unknown error"
+                    self._update_status(f"[red]❌ SQL error: {error}[/]")
+            elif event.state == Worker.State.ERROR:
+                error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+                self._update_status(f"[red]❌ Query error: {error_msg}[/]")
+            # Re-enable SQL run button
+            run_btn = self.query_one("#run-sql-btn", Button)
+            run_btn.disabled = False
+            run_btn.label = "Run SQL"
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses.
 
         Args:
             event: Button press event
         """
-        if event.button.id == "apply-btn":
+        button_id = event.button.id
+        if button_id == "apply-btn":
             self._apply_query()
+        elif button_id == "reset-btn":
+            self._reset_query()
+        elif button_id == "run-sql-btn":
+            self._run_sql_query()
+        elif button_id == "reset-sql-btn":
+            self._reset_sql_query()
         elif event.button.id == "reset-btn":
             self._reset_query()
 
@@ -1723,4 +1779,108 @@ class TablePreviewScreen(Screen):
 
     def action_apply(self) -> None:
         """Apply query action (key binding)."""
-        self._apply_query()
+        if self.sql_mode:
+            self._run_sql_query()
+        else:
+            self._apply_query()
+
+    # SQL Mode methods
+    def watch_sql_mode(self, sql_mode: bool) -> None:
+        """React to SQL mode toggle changes.
+
+        Args:
+            sql_mode: True for SQL mode, False for Builder mode
+        """
+        # Update mode label
+        mode_label = self.query_one("#mode-label", Static)
+        mode_label.update("SQL" if sql_mode else "Builder")
+
+        # Show/hide appropriate controls
+        builder_controls = self.query_one("#builder-controls", Vertical)
+        sql_controls = self.query_one("#sql-controls", Vertical)
+
+        builder_controls.display = not sql_mode
+        sql_controls.display = sql_mode
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle SQL mode toggle."""
+        if event.switch.id == "sql-mode-switch":
+            self.sql_mode = event.value
+
+    def _get_sql_from_ui(self) -> str | None:
+        """Get SQL query from the text area.
+
+        Returns:
+            SQL query string or None if empty
+        """
+        sql_input = self.query_one("#sql-input", TextArea)
+        sql = sql_input.text.strip()
+        if not sql:
+            return None
+        return sql
+
+    def _run_sql_query(self) -> None:
+        """Execute SQL query and refresh the table."""
+        sql = self._get_sql_from_ui()
+        if not sql:
+            self._update_status("[red]❌ Please enter a SQL query[/]")
+            return
+
+        # Disable run button during query
+        run_btn = self.query_one("#run-sql-btn", Button)
+        run_btn.disabled = True
+        run_btn.label = "Running..."
+
+        self._update_status("[yellow]🔄 Executing SQL...[/]")
+
+        # Run query in background worker
+        self._query_worker = self.run_worker(
+            self._do_sql_query(sql),
+            name="sql_query_worker",
+            description="Execute SQL query",
+        )
+
+    async def _do_sql_query(self, sql: str) -> dict[str, Any]:
+        """Background worker to execute SQL query.
+
+        Args:
+            sql: SQL query string
+
+        Returns:
+            Dictionary with result data and status
+        """
+        import polars as pl
+
+        try:
+            executor = DuckDBQueryExecutor(validate=True, max_rows=self.limit or 1000)
+
+            if self._base_data is not None:
+                # Query in-memory data
+                result_df = executor.execute_sql(self._base_data, sql, table_name="data")
+            elif self.csv_path:
+                # Query CSV file
+                result_df = executor.execute_sql_csv(self.csv_path, sql, table_name="data")
+            else:
+                return {"success": False, "error": "No data source available"}
+
+            return {
+                "success": True,
+                "df": result_df,
+                "result_count": len(result_df),
+                "total_count": len(self._base_data) if self._base_data is not None else 0,
+            }
+
+        except UnsafeQueryError as e:
+            return {"success": False, "error": f"Unsafe query: {e}"}
+        except ValidationError as e:
+            return {"success": False, "error": str(e)}
+        except QueryExecutorError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Unexpected error: {e}"}
+
+    def _reset_sql_query(self) -> None:
+        """Reset SQL query to default."""
+        sql_input = self.query_one("#sql-input", TextArea)
+        sql_input.text = "SELECT * FROM data LIMIT 100"
+        self._reset_query()
