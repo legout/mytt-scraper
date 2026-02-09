@@ -16,18 +16,6 @@ Reference documentation in this section is:
 
 - **[CLI Reference](cli.md)** — Command-line interface modes, prompts, and outputs
 - **[Python API](python-api.md)** — Library usage, REPL workflows, and in-memory tables
-- **[Table Schemas](table-schemas.md)** — Complete field descriptions for all CSV output tables
-- **[CLI Options](cli-options.md)** — Command-line arguments and environment variables
-
-### Data Formats
-
-- **[CSV Output Format](csv-format.md)** — Column descriptions and data types
-- **[JSON Response Structure](json-structure.md)** — Internal data representation
-
-### Configuration
-
-- **[Environment Variables](environment-variables.md)** — Configuration via environment
-- **[Configuration File](config-file.md)** — Settings and customization options
 
 ---
 

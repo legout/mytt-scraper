@@ -15,18 +15,13 @@ How-to guides in this section are:
 ### Searching and Fetching Data
 
 - **[Search for Players](search-players.md)** — Find players by name or club
-- **[Fetch Multiple Players](fetch-multiple.md)** — Batch download data for several players
+- **[Search Guide](search-guide.md)** — Complete guide to player search functionality
 - **[Fetch External Profile](fetch-external-profile.md)** — Download data for a specific player by user ID
 
-### Working with Data
+### Working with Data in TUI
 
-- **[Filter and Query Tables](filter-query-tables.md)** — Use the TUI table viewer to analyze your data
-- **[Export to Different Formats](export-formats.md)** — Convert data to your preferred format
-
-### Troubleshooting
-
-- **[Debug Login Issues](debug-login.md)** — Resolve authentication problems
-- **[Handle Captchas](handle-captchas.md)** — Deal with captcha challenges
+- **[TUI Table Viewer](tui-table-viewer.md)** — Use the TUI table viewer to explore data
+- **[TUI Table Queries](tui-table-queries.md)** — Filter, sort, and query tables with SQL
 
 ### Contributing
 

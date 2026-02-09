@@ -9,11 +9,15 @@ Contributing = "docs/contributing.md"
 [nav.Tutorials]
 "Tutorials Overview" = "docs/tutorials/index.md"
 "First Run" = "docs/tutorials/first-run.md"
+"Usage Guide" = "docs/tutorials/usage.md"
 
 [nav."How-To Guides"]
 "How-To Overview" = "docs/how-to/index.md"
 "Search for Players" = "docs/how-to/search-players.md"
+"Search Guide" = "docs/how-to/search-guide.md"
 "Fetch External Profile" = "docs/how-to/fetch-external-profile.md"
+"TUI Table Viewer" = "docs/how-to/tui-table-viewer.md"
+"TUI Table Queries" = "docs/how-to/tui-table-queries.md"
 "Contribute to Documentation" = "docs/how-to/contribute-docs.md"
 
 [nav.Reference]
@@ -24,6 +28,7 @@ Contributing = "docs/contributing.md"
 [nav.Explanation]
 "Explanation Overview" = "docs/explanation/index.md"
 "System Architecture" = "docs/explanation/architecture.md"
+"Search Feature" = "docs/explanation/search-feature.md"
 "In-Memory vs Disk Tables" = "docs/explanation/in-memory-vs-disk-tables.md"
 
 [theme]

@@ -15,6 +15,7 @@ Tutorials in this section are:
 ### Getting Started
 
 - **[First Run](first-run.md)** — Install, set up Playwright, log in, and fetch your first profile data
+- **[Usage Guide](usage.md)** — Overview of scraper modes and usage
 
 *(More tutorials coming soon!)*
 
