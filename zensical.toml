@@ -1,36 +1,39 @@
+[project]
 site_name = "mytt-scraper"
 site_description = "Documentation for mytt-scraper - a Python scraper for mytischtennis.de"
 site_url = "https://legout.github.io/mytt-scraper"
+copyright = "Copyright &copy; 2026 legout"
 
-[nav]
-Home = "README.md"
-Contributing = "docs/contributing.md"
+nav = [
+  { "Tutorials" = [
+    "tutorials/index.md",
+    { "First Run" = "tutorials/first-run.md" },
+    { "Usage Guide" = "tutorials/usage.md" },
+  ]},
+  { "How-To Guides" = [
+    "how-to/index.md",
+    { "Search for Players" = "how-to/search-players.md" },
+    { "Search Guide" = "how-to/search-guide.md" },
+    { "Fetch External Profile" = "how-to/fetch-external-profile.md" },
+    { "TUI Table Viewer" = "how-to/tui-table-viewer.md" },
+    { "TUI Table Queries" = "how-to/tui-table-queries.md" },
+    { "Contribute to Documentation" = "how-to/contribute-docs.md" },
+  ]},
+  { "Reference" = [
+    "reference/index.md",
+    { "CLI Reference" = "reference/cli.md" },
+    { "Python API" = "reference/python-api.md" },
+  ]},
+  { "Explanation" = [
+    "explanation/index.md",
+    { "System Architecture" = "explanation/architecture.md" },
+    { "Search Feature" = "explanation/search-feature.md" },
+    { "In-Memory vs Disk Tables" = "explanation/in-memory-vs-disk-tables.md" },
+  ]},
+  { "Contributing" = "contributing.md" },
+  { "Home" = "index.md" },
+]
 
-[nav.Tutorials]
-"Tutorials Overview" = "docs/tutorials/index.md"
-"First Run" = "docs/tutorials/first-run.md"
-"Usage Guide" = "docs/tutorials/usage.md"
-
-[nav."How-To Guides"]
-"How-To Overview" = "docs/how-to/index.md"
-"Search for Players" = "docs/how-to/search-players.md"
-"Search Guide" = "docs/how-to/search-guide.md"
-"Fetch External Profile" = "docs/how-to/fetch-external-profile.md"
-"TUI Table Viewer" = "docs/how-to/tui-table-viewer.md"
-"TUI Table Queries" = "docs/how-to/tui-table-queries.md"
-"Contribute to Documentation" = "docs/how-to/contribute-docs.md"
-
-[nav.Reference]
-"Reference Overview" = "docs/reference/index.md"
-"CLI Reference" = "docs/reference/cli.md"
-"Python API" = "docs/reference/python-api.md"
-
-[nav.Explanation]
-"Explanation Overview" = "docs/explanation/index.md"
-"System Architecture" = "docs/explanation/architecture.md"
-"Search Feature" = "docs/explanation/search-feature.md"
-"In-Memory vs Disk Tables" = "docs/explanation/in-memory-vs-disk-tables.md"
-
-[theme]
+[project.theme]
 primary = "teal"
 accent = "amber"

@@ -2,20 +2,68 @@
 
 ## Current State
 
-- Status: RUNNING
+- Status: COMPLETE
 - Current ticket: (none)
 - Started: 2026-02-08T16:06:23Z
-- Last updated: 2026-02-08T18:42:24Z
+- Last updated: 2026-02-08T23:35:51Z
 
 ## Statistics
 
-- Tickets completed: 20
+- Tickets completed: 32
 - Tickets failed: 1
-- Total iterations: 21
+- Total iterations: 33
 
 ## History
 
 <!-- Auto-appended entries below -->
+- ms-xy4t: COMPLETE (2026-02-08T23:35:46Z)
+  - Summary: Add "Contributing to docs" page (preview/build/style rules)
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-44ps: COMPLETE (2026-02-08T23:34:09Z)
+  - Summary: Add CI job to build docs with Zensical
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-btdf: COMPLETE (2026-02-08T23:32:20Z)
+  - Summary: Add Zensical configuration + Diátaxis nav skeleton
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-xj1i: COMPLETE (2026-02-08T23:29:55Z)
+  - Summary: Write explanation: architecture + in-memory vs disk tables
+  - Issues: Critical(0)/Major(0)/Minor(2)
+  - Status: COMPLETE
+- ms-j04u: COMPLETE (2026-02-08T23:27:23Z)
+  - Summary: Write reference: Python API (REPL usage) including in-memory tables
+  - Issues: Critical(0)/Major(1)/Minor(2)
+  - Status: COMPLETE
+- ms-861m: COMPLETE (2026-02-08T23:24:21Z)
+  - Summary: Write reference: CLI modes + outputs + headed/headless behavior
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-lxid: COMPLETE (2026-02-08T23:22:15Z)
+  - Summary: Author how-to: Search players and fetch external profile (CLI + TUI)
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-dxg2: COMPLETE (2026-02-08T23:19:04Z)
+  - Summary: Author tutorial: First run (install + Playwright + login + fetch own profile)
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-qm00: COMPLETE (2026-02-08T23:17:37Z)
+  - Summary: Create Diátaxis docs folder structure + section landing pages
+  - Issues: Critical(0)/Major(0)/Minor(2)
+  - Status: COMPLETE
+- ms-24my: COMPLETE (2026-02-08T18:51:22Z)
+  - Summary: Document TUI table viewer usage + data sources (in-memory vs disk)
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-24n1: COMPLETE (2026-02-08T18:48:42Z)
+  - Summary: Convert to rows for DataTable
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-b7cc: COMPLETE (2026-02-08T18:47:00Z)
+  - Summary: Build TablePreviewScreen using Textual DataTable + Polars/PyArrow
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
 - ms-fkf4: COMPLETE (2026-02-08T18:42:24Z)
   - Summary: Implement table discovery (in-memory + disk) with friendly names
   - Issues: Critical(0)/Major(0)/Minor(0)
@@ -138,4 +186,17 @@
   - Summary: Build TablePreviewScreen using Textual DataTable + Polars/PyArrow
   - Issues: Critical(0)/Major(0)/Minor(0)
   - Status: COMPLETE
+- ms-qm00: COMPLETE (2026-02-09T00:15:51+01:00)
+  - Summary: Create Diátaxis docs folder structure + section landing pages
+  - Issues: Critical(0)/Major(0)/Minor(2)
+  - Status: COMPLETE
 
+
+- ms-lxid: COMPLETE (2026-02-09T00:22:00+01:00)
+  - Summary: Author how-to guides for searching players and fetching external profiles
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
+- ms-44ps: COMPLETE (2026-02-09T00:35:00+01:00)
+  - Summary: Add CI job to build docs with Zensical
+  - Issues: Critical(0)/Major(0)/Minor(0)
+  - Status: COMPLETE
