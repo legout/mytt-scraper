@@ -11,7 +11,7 @@ from textual.widgets import (
     Switch, Checkbox, ProgressBar, RichLog, Select, TextArea
 )
 from textual.reactive import reactive
-from textual.worker import Worker
+from textual.worker import Worker, WorkerState
 
 from ..utils.auth import login_with_playwright
 from ..utils.query_model import (
@@ -132,18 +132,18 @@ class LoginScreen(Screen):
         if event.worker.name != "login_worker":
             return
         
-        if event.state == Worker.State.SUCCESS:
+        if event.state == WorkerState.SUCCESS:
             # Login completed, check result
             result = event.worker.result
             if result:
                 self._handle_login_success()
             else:
                 self._handle_login_failure("Login failed. Please check your credentials.")
-        elif event.state == Worker.State.ERROR:
+        elif event.state == WorkerState.ERROR:
             # Worker encountered an error
             error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
             self._handle_login_failure(f"Login error: {error_msg}")
-        elif event.state == Worker.State.CANCELLED:
+        elif event.state == WorkerState.CANCELLED:
             # Worker was cancelled
             self._handle_login_failure("Login was cancelled.")
     
@@ -304,8 +304,14 @@ class MainMenuScreen(Screen):
         self._update_status("[yellow]🌐 Logging in and fetching data...[/]")
 
         try:
-            # Login first
-            if not scraper.login():
+            # Login first using async login (can't use asyncio.run inside running event loop)
+            login_success = await login_with_playwright(
+                scraper.username,
+                scraper.password,
+                headless=scraper.headless,
+                session_cookies=scraper.session.cookies
+            )
+            if not login_success:
                 return {"success": False, "error": "Login failed"}
 
             self._update_status("[yellow]🌐 Fetching data from server...[/]")
@@ -381,8 +387,14 @@ class MainMenuScreen(Screen):
         self._update_status("[yellow]🌐 Logging in and fetching data...[/]")
 
         try:
-            # Login first
-            if not scraper.login():
+            # Login first using async login (can't use asyncio.run inside running event loop)
+            login_success = await login_with_playwright(
+                scraper.username,
+                scraper.password,
+                headless=scraper.headless,
+                session_cookies=scraper.session.cookies
+            )
+            if not login_success:
                 return {"success": False, "error": "Login failed"}
 
             self._update_status(f"[yellow]🌐 Fetching profile for {user_id}...[/]")
@@ -448,17 +460,17 @@ class MainMenuScreen(Screen):
         if event.worker.name not in ["fetch_profile_worker", "fetch_external_worker"]:
             return
 
-        if event.state == Worker.State.SUCCESS:
+        if event.state == WorkerState.SUCCESS:
             result = event.worker.result
             if result and result.get("success"):
                 self._handle_fetch_success(result)
             else:
                 error = result.get("error", "Unknown error") if result else "Unknown error"
                 self._handle_fetch_failure(error)
-        elif event.state == Worker.State.ERROR:
+        elif event.state == WorkerState.ERROR:
             error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
             self._handle_fetch_failure(error_msg)
-        elif event.state == Worker.State.CANCELLED:
+        elif event.state == WorkerState.CANCELLED:
             self._handle_fetch_failure("Operation was cancelled")
 
     def _handle_fetch_success(self, result: dict) -> None:
@@ -656,13 +668,13 @@ class SearchScreen(Screen):
         if event.worker.name != "search_worker":
             return
 
-        if event.state == Worker.State.SUCCESS:
+        if event.state == WorkerState.SUCCESS:
             results = event.worker.result or []
             self._handle_search_success(results)
-        elif event.state == Worker.State.ERROR:
+        elif event.state == WorkerState.ERROR:
             error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
             self._handle_search_failure(f"Search error: {error_msg}")
-        elif event.state == Worker.State.CANCELLED:
+        elif event.state == WorkerState.CANCELLED:
             self._handle_search_failure("Search was cancelled")
 
     def _handle_search_success(self, results: list[dict]) -> None:
@@ -929,11 +941,17 @@ class BatchFetchScreen(Screen):
         failed_players: list[tuple[str, str]] = []
         tables_dir = scraper.tables_dir if hasattr(scraper, 'tables_dir') else Path("tables")
 
-        # Ensure logged in
+        # Ensure logged in using async login (can't use asyncio.run inside running event loop)
         self._log_message("[yellow]🔐 Logging in...[/]")
         
         try:
-            if hasattr(scraper, 'login') and not scraper.login():
+            login_success = await login_with_playwright(
+                scraper.username,
+                scraper.password,
+                headless=scraper.headless,
+                session_cookies=scraper.session.cookies
+            )
+            if not login_success:
                 self._log_message("[red]❌ Login failed[/]")
                 return {
                     "success": False,
@@ -1096,10 +1114,10 @@ class BatchFetchScreen(Screen):
         if event.worker.name != "batch_fetch_worker":
             return
 
-        if event.state in [Worker.State.SUCCESS, Worker.State.ERROR, Worker.State.CANCELLED]:
+        if event.state in [WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED]:
             self._enable_back_button()
             
-            if event.state == Worker.State.ERROR:
+            if event.state == WorkerState.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._log_message(f"[red]❌ Worker error: {error_msg}[/]")
 
@@ -1492,7 +1510,7 @@ class TablePreviewScreen(Screen):
             event: Worker state change event
         """
         if event.worker.name == "load_data_worker":
-            if event.state == Worker.State.SUCCESS:
+            if event.state == WorkerState.SUCCESS:
                 result = event.worker.result
                 if result and result.get("success"):
                     self._update_column_select(result["columns"], result["dtypes"])
@@ -1505,7 +1523,7 @@ class TablePreviewScreen(Screen):
                 else:
                     error = result.get("error", "Unknown error") if result else "Unknown error"
                     self._update_status(f"[red]❌ Error: {error}[/]")
-            elif event.state == Worker.State.ERROR:
+            elif event.state == WorkerState.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._update_status(f"[red]❌ Error: {error_msg}[/]")
             # Re-enable apply button after load completes
@@ -1514,7 +1532,7 @@ class TablePreviewScreen(Screen):
             apply_btn.label = "Apply"
 
         elif event.worker.name == "query_worker":
-            if event.state == Worker.State.SUCCESS:
+            if event.state == WorkerState.SUCCESS:
                 result = event.worker.result
                 if result and result.get("success"):
                     self._populate_table(result["df"])
@@ -1526,7 +1544,7 @@ class TablePreviewScreen(Screen):
                 else:
                     error = result.get("error", "Unknown error") if result else "Unknown error"
                     self._update_status(f"[red]❌ Query error: {error}[/]")
-            elif event.state == Worker.State.ERROR:
+            elif event.state == WorkerState.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._update_status(f"[red]❌ Query error: {error_msg}[/]")
             # Re-enable apply button
@@ -1535,7 +1553,7 @@ class TablePreviewScreen(Screen):
             apply_btn.label = "Apply"
 
         elif event.worker.name == "sql_query_worker":
-            if event.state == Worker.State.SUCCESS:
+            if event.state == WorkerState.SUCCESS:
                 result = event.worker.result
                 if result and result.get("success"):
                     self._populate_table(result["df"])
@@ -1547,7 +1565,7 @@ class TablePreviewScreen(Screen):
                 else:
                     error = result.get("error", "Unknown error") if result else "Unknown error"
                     self._update_status(f"[red]❌ SQL error: {error}[/]")
-            elif event.state == Worker.State.ERROR:
+            elif event.state == WorkerState.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._update_status(f"[red]❌ Query error: {error_msg}[/]")
             # Re-enable SQL run button
