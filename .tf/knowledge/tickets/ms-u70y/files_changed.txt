@@ -1,5 +1,0 @@
-src/mytt_scraper/utils/query_model.py
-src/mytt_scraper/utils/query_executor.py
-src/mytt_scraper/utils/__init__.py
-tests/test_query_model.py
-tests/test_query_executor.py

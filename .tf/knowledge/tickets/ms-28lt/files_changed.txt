@@ -1,2 +1,0 @@
-src/mytt_scraper/tui/screens.py
-src/mytt_scraper/tui/app.py

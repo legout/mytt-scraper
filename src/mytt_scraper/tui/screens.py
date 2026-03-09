@@ -33,13 +33,13 @@ __all__ = [
 
 class LoginScreen(Screen):
     """Screen for user login with username/password.
-    
+
     Login runs in a background worker to keep the UI responsive.
     Credentials are session-only (not persisted).
     """
 
     BINDINGS = [("q", "quit", "Quit")]
-    
+
     def __init__(self) -> None:
         super().__init__()
         self._login_worker: Worker | None = None
@@ -61,82 +61,92 @@ class LoginScreen(Screen):
         """Handle login button press."""
         if event.button.id == "login-btn":
             self._start_login()
-    
+
     def _start_login(self) -> None:
         """Validate inputs and start background login worker."""
         username_input = self.query_one("#username", Input)
         password_input = self.query_one("#password", Input)
         login_btn = self.query_one("#login-btn", Button)
         status = self.query_one("#login-status", Static)
-        
+
         self._username = username_input.value.strip()
         self._password = password_input.value
-        
+
         if not self._username or not self._password:
             status.update("[red]Please enter both username and password[/]")
             return
-        
+
         # Disable inputs and button during login
         username_input.disabled = True
         password_input.disabled = True
         login_btn.disabled = True
         login_btn.label = "Logging in..."
-        
+
         # Update status
         status.update("[yellow]🔄 Starting login process...[/]")
-        
+
         # Run login in background worker to keep UI responsive
         self._login_worker = self.run_worker(
             self._do_login(self._username, self._password),
             name="login_worker",
             description="Login to mytischtennis.de",
         )
-    
-    async def _do_login(self, username: str, password: str) -> bool:
+
+    async def _do_login(self, username: str, password: str) -> dict:
         """Background worker task to perform login via Playwright.
-        
+
         Args:
             username: Email/username for login
             password: Password for login
-            
+
         Returns:
-            True if login successful, False otherwise
+            Dict with 'success' bool and 'cookies' dict if successful
         """
         # Update status directly (async worker runs on main thread)
         self._update_status("[yellow]🌐 Connecting to mytischtennis.de...[/]")
-        
+
         try:
-            # Run the async login function
-            result = await login_with_playwright(username, password, headless=True)
-            return result
+            # Create a temporary cookie jar to capture cookies
+            from requests.cookies import RequestsCookieJar
+            temp_jar = RequestsCookieJar()
+
+            # Run the async login function with cookie capture
+            result = await login_with_playwright(username, password, headless=True, session_cookies=temp_jar)
+
+            if result:
+                # Convert cookie jar to dict for returning
+                cookies_dict = {cookie.name: cookie.value for cookie in temp_jar}
+                return {'success': True, 'cookies': cookies_dict}
+            else:
+                return {'success': False, 'cookies': {}}
         except Exception as e:
             # Log error and return failure
             self._update_status(f"[red]❌ Error during login: {e}[/]")
-            return False
-    
+            return {'success': False, 'cookies': {}}
+
     def _update_status(self, message: str) -> None:
         """Update the status display.
-        
+
         Args:
             message: Status message to display
         """
         status = self.query_one("#login-status", Static)
         status.update(message)
-    
+
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Handle worker state changes (completion, error, etc.).
-        
+
         Args:
             event: Worker state change event
         """
         if event.worker.name != "login_worker":
             return
-        
+
         if event.state == WorkerState.SUCCESS:
             # Login completed, check result
             result = event.worker.result
-            if result:
-                self._handle_login_success()
+            if result and result.get('success'):
+                self._handle_login_success(result.get('cookies', {}))
             else:
                 self._handle_login_failure("Login failed. Please check your credentials.")
         elif event.state == WorkerState.ERROR:
@@ -146,49 +156,61 @@ class LoginScreen(Screen):
         elif event.state == WorkerState.CANCELLED:
             # Worker was cancelled
             self._handle_login_failure("Login was cancelled.")
-    
-    def _handle_login_success(self) -> None:
-        """Handle successful login - store scraper and navigate to main menu."""
+
+    def _handle_login_success(self, cookies: dict = None) -> None:
+        """Handle successful login - store scraper and navigate to main menu.
+
+        Args:
+            cookies: Dictionary of cookies from successful login
+        """
         status = self.query_one("#login-status", Static)
         status.update("[green]✓ Login successful![/]")
-        
+
         # Create and store authenticated scraper in app state
         # Using PlayerSearcher which extends MyTischtennisScraper
         self.app.set_searcher(self._username, self._password, headless=True)
-        
+
+        # Transfer cookies to the scraper's session
+        if cookies:
+            scraper = self.app.get_scraper()
+            if scraper:
+                for name, value in cookies.items():
+                    scraper.session.cookies.set(name, value)
+                print(f"[DEBUG] Transferred {len(cookies)} cookies to scraper session")
+
         # Clear credentials from memory (session-only)
         self._password = ""
-        
+
         # Navigate to main menu after brief delay to show success
         self.set_timer(0.5, lambda: self.app.push_screen("main_menu"))
-    
+
     def _handle_login_failure(self, message: str) -> None:
         """Handle login failure - show error and allow retry.
-        
+
         Args:
             message: Error message to display
         """
         status = self.query_one("#login-status", Static)
         status.update(f"[red]❌ {message}[/]")
-        
+
         # Re-enable inputs and button for retry
         self._enable_login_form()
-    
+
     def _enable_login_form(self) -> None:
         """Re-enable the login form for retry."""
         username_input = self.query_one("#username", Input)
         password_input = self.query_one("#password", Input)
         login_btn = self.query_one("#login-btn", Button)
-        
+
         username_input.disabled = False
         password_input.disabled = False
         login_btn.disabled = False
         login_btn.label = "Login"
-        
+
         # Clear password for security
         password_input.value = ""
         self._password = ""
-    
+
     def action_quit(self) -> None:
         """Quit the application."""
         # Cancel any running login worker
@@ -530,6 +552,15 @@ class SearchScreen(Screen):
         self._search_results: list[dict] = []
         self._selected_user_ids: set[str] = set()
 
+    def _log_debug(self, message: str) -> None:
+        """Write debug message to log file."""
+        import datetime
+        from pathlib import Path
+        log_file = Path("tui_debug.log")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] [SearchScreen] {message}\n")
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="search-container"):
@@ -559,9 +590,9 @@ class SearchScreen(Screen):
             # Fetch button
             with Center():
                 yield Button(
-                    "Fetch Selected Players", 
-                    id="fetch-btn", 
-                    variant="success", 
+                    "Fetch Selected Players",
+                    id="fetch-btn",
+                    variant="success",
                     disabled=True
                 )
 
@@ -618,8 +649,9 @@ class SearchScreen(Screen):
         search_btn.disabled = True
         search_btn.label = "Searching..."
 
-        # Clear previous results
+        # Clear previous results (but keep columns)
         table.clear()
+        self._log_debug(f"Table cleared in _start_search, rows: {table.row_count}")
         table.disabled = True
         self._search_results = []
         self._selected_user_ids.clear()
@@ -636,6 +668,15 @@ class SearchScreen(Screen):
             description=f"Search for players: {query}",
         )
 
+    def _log_debug(self, message: str) -> None:
+        """Write debug message to log file."""
+        import datetime
+        from pathlib import Path
+        log_file = Path("tui_debug.log")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {message}\n")
+
     async def _do_search(self, scraper, query: str, use_playwright: bool) -> list[dict]:
         """Background worker to perform player search.
 
@@ -647,14 +688,57 @@ class SearchScreen(Screen):
         Returns:
             List of player dictionaries
         """
+        self._log_debug(f"_do_search called: query='{query}', use_playwright={use_playwright}")
+
         try:
             # PlayerSearcher has search_players method
             if hasattr(scraper, 'search_players'):
+                self._log_debug(f"Scraper has search_players method")
+                self._log_debug(f"Session cookies: {len(scraper.session.cookies)}")
+
+                # Check if we have cookies (already logged in)
+                if not scraper.session.cookies:
+                    # Need to login first - use async version directly
+                    self._update_status("[yellow]🔐 Logging in...[/]")
+                    self._log_debug("No cookies, calling login_with_playwright() directly")
+
+                    # Import and call async login directly (we're already in async context)
+                    from ..utils.auth import login_with_playwright
+                    login_success = await login_with_playwright(
+                        scraper.username,
+                        scraper.password,
+                        scraper.headless,
+                        scraper.session.cookies
+                    )
+
+                    if not login_success:
+                        self._update_status("[red]❌ Login failed. Cannot search.[/]")
+                        self._log_debug("Login failed")
+                        return []
+                    self._log_debug("Login successful")
+                else:
+                    self._log_debug("Already have cookies, skipping login")
+
+                self._update_status(f"[yellow]🔍 Searching for '{query}'...[/]")
+                self._log_debug(f"Calling search_players('{query}', use_playwright={use_playwright})")
+
                 results = scraper.search_players(query, use_playwright=use_playwright)
+
+                self._log_debug(f"Search returned {len(results)} results")
+                if results:
+                    self._log_debug(f"First result: {results[0]}")
+                else:
+                    self._log_debug("No results returned")
+
                 return results
             else:
+                self._update_status("[red]❌ Scraper doesn't support search[/]")
+                self._log_debug("ERROR: Scraper doesn't have search_players method")
                 return []
         except Exception as e:
+            import traceback
+            self._log_debug(f"EXCEPTION: {e}")
+            self._log_debug(traceback.format_exc())
             self._update_status(f"[red]Search error: {e}[/]")
             return []
 
@@ -665,35 +749,50 @@ class SearchScreen(Screen):
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Handle search worker completion."""
+        self._log_debug(f"Worker state changed: {event.worker.name} -> {event.state}")
+
         if event.worker.name != "search_worker":
+            self._log_debug(f"Ignoring worker: {event.worker.name}")
             return
 
         if event.state == WorkerState.SUCCESS:
             results = event.worker.result or []
+            self._log_debug(f"Worker SUCCESS, results count: {len(results)}")
             self._handle_search_success(results)
         elif event.state == WorkerState.ERROR:
             error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
+            self._log_debug(f"Worker ERROR: {error_msg}")
             self._handle_search_failure(f"Search error: {error_msg}")
         elif event.state == WorkerState.CANCELLED:
+            self._log_debug("Worker CANCELLED")
             self._handle_search_failure("Search was cancelled")
 
     def _handle_search_success(self, results: list[dict]) -> None:
         """Handle successful search - populate results table."""
+        self._log_debug(f"_handle_search_success called with {len(results)} results")
+
         self._search_results = results
         status = self.query_one("#search-status", Static)
         table = self.query_one("#results-table", DataTable)
 
+        # Clear table first
+        self._log_debug(f"Clearing table (current rows: {table.row_count})")
+        table.clear()
+        self._log_debug(f"Table cleared, rows now: {table.row_count}")
+
         if not results:
+            self._log_debug("No results, showing 'No players found'")
             status.update("[yellow]No players found[/]")
             table.disabled = True
             self._set_selection_controls_enabled(False)
         else:
+            self._log_debug(f"Populating table with {len(results)} players")
             status.update(f"[green]✓ Found {len(results)} player(s)[/]")
             table.disabled = False
             self._set_selection_controls_enabled(True)
 
             # Populate table
-            for player in results:
+            for i, player in enumerate(results):
                 # Build display name
                 name = player.get('name', '')
                 if not name:
@@ -705,9 +804,22 @@ class SearchScreen(Screen):
                 ttr = str(player.get('ttr', 'N/A'))
                 user_id = player.get('user_id', player.get('personId', 'N/A'))
 
+                self._log_debug(f"Adding row {i}: name='{name}', club='{club}', ttr='{ttr}', user_id='{user_id}'")
+
                 # Checkbox column shows "☐" or "☑" based on selection
                 checkbox = "☐"
-                table.add_row(checkbox, name, club, ttr, user_id, key=user_id)
+
+                try:
+                    table.add_row(checkbox, name, club, ttr, user_id, key=user_id)
+                    self._log_debug(f"Row {i} added successfully")
+                except Exception as e:
+                    self._log_debug(f"ERROR adding row {i}: {e}")
+
+            self._log_debug(f"Finished adding rows. Table now has {table.row_count} rows")
+
+            # Force table update
+            table.focus()
+            table.refresh()
 
         # Re-enable controls
         self._enable_search_form()
@@ -731,77 +843,97 @@ class SearchScreen(Screen):
         """Enable or disable selection control buttons."""
         select_all_btn = self.query_one("#select-all-btn", Button)
         clear_selection_btn = self.query_one("#clear-selection-btn", Button)
-        
+
         select_all_btn.disabled = not enabled
         clear_selection_btn.disabled = not enabled
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection in results table - toggle checkbox."""
-        user_id = event.row_key.value
-        if not user_id:
-            return
+        try:
+            user_id = event.row_key.value
+            if not user_id:
+                self._log_debug("Row selected but no user_id in row_key")
+                return
 
-        table = self.query_one("#results-table", DataTable)
-        
-        # Toggle selection
-        if user_id in self._selected_user_ids:
-            self._selected_user_ids.discard(user_id)
-        else:
-            self._selected_user_ids.add(user_id)
+            self._log_debug(f"Row selected: {user_id}")
+            table = self.query_one("#results-table", DataTable)
 
-        # Update the checkbox display for this row
-        self._update_row_checkbox(table, user_id)
-        self._update_selection_ui()
+            # Toggle selection
+            if user_id in self._selected_user_ids:
+                self._selected_user_ids.discard(user_id)
+                self._log_debug(f"Deselected {user_id}")
+            else:
+                self._selected_user_ids.add(user_id)
+                self._log_debug(f"Selected {user_id}")
+
+            # Update the checkbox display for this row
+            self._update_row_checkbox(table, user_id)
+            self._update_selection_ui()
+        except Exception as e:
+            self._log_debug(f"Error in on_data_table_row_selected: {e}")
+            import traceback
+            self._log_debug(traceback.format_exc())
 
     def action_toggle_selection(self) -> None:
         """Toggle selection of the currently highlighted row."""
         table = self.query_one("#results-table", DataTable)
         if table.cursor_row is None:
             return
-        
+
         # Get the row key at cursor position
         row_key = table.get_row_at(table.cursor_row)
         if row_key and len(row_key) > 4:
             user_id = row_key[4]  # User ID is in the 5th column
-            
+
             # Toggle selection
             if user_id in self._selected_user_ids:
                 self._selected_user_ids.discard(user_id)
             else:
                 self._selected_user_ids.add(user_id)
-            
+
             self._update_row_checkbox(table, user_id)
             self._update_selection_ui()
 
     def _update_row_checkbox(self, table: DataTable, user_id: str) -> None:
         """Update the checkbox display for a specific row."""
-        # Get current row data
-        row = table.get_row(user_id)
-        if row:
-            checkbox = "☑" if user_id in self._selected_user_ids else "☐"
-            # Update the row with new checkbox state
-            new_row = (checkbox,) + row[1:]
-            table.update_cell(user_id, table.columns[0].key, checkbox)
+        try:
+            # Get current row data
+            row = table.get_row(user_id)
+            if row:
+                checkbox = "☑" if user_id in self._selected_user_ids else "☐"
+                # Update the checkbox cell directly
+                # Get the first column key (checkbox column)
+                # columns is a dict, need to get the first key
+                if table.columns:
+                    first_col_key = next(iter(table.columns.keys()))
+                    table.update_cell(user_id, first_col_key, checkbox)
+        except Exception as e:
+            self._log_debug(f"Error updating checkbox for {user_id}: {e}")
 
     def _select_all(self) -> None:
         """Select all players in the results."""
-        table = self.query_one("#results-table", DataTable)
-        
-        for player in self._search_results:
-            user_id = player.get('user_id', player.get('personId', ''))
-            if user_id:
-                self._selected_user_ids.add(user_id)
-                self._update_row_checkbox(table, user_id)
-        
-        self._update_selection_ui()
+        try:
+            table = self.query_one("#results-table", DataTable)
+            
+            for player in self._search_results:
+                user_id = player.get('user_id', player.get('personId', ''))
+                if user_id:
+                    self._selected_user_ids.add(user_id)
+                    self._update_row_checkbox(table, user_id)
+            
+            self._update_selection_ui()
+        except Exception as e:
+            self._log_debug(f"Error in _select_all: {e}")
+            import traceback
+            self._log_debug(traceback.format_exc())
 
     def _clear_selection(self) -> None:
         """Clear all selections."""
         table = self.query_one("#results-table", DataTable)
-        
+
         for user_id in list(self._selected_user_ids):
             self._update_row_checkbox(table, user_id)
-        
+
         self._selected_user_ids.clear()
         self._update_selection_ui()
 
@@ -809,11 +941,11 @@ class SearchScreen(Screen):
         """Update selection count display and fetch button state."""
         count_label = self.query_one("#selection-count", Static)
         fetch_btn = self.query_one("#fetch-btn", Button)
-        
+
         count = len(self._selected_user_ids)
         count_label.update(f"{count} selected")
         fetch_btn.disabled = count == 0
-        
+
         if count > 0:
             fetch_btn.label = f"Fetch {count} Player{'s' if count > 1 else ''}"
         else:
@@ -870,11 +1002,11 @@ class BatchFetchScreen(Screen):
         yield Header(show_clock=True)
         with Vertical(id="batch-fetch-container"):
             yield Label("Batch Fetch Progress", id="batch-fetch-title")
-            
+
             # Progress section
             with Vertical(id="progress-section"):
                 yield Static(
-                    f"Fetching {len(self._players)} player(s)...", 
+                    f"Fetching {len(self._players)} player(s)...",
                     id="progress-status"
                 )
                 yield ProgressBar(
@@ -882,27 +1014,27 @@ class BatchFetchScreen(Screen):
                     show_eta=False,
                     id="progress-bar"
                 )
-            
+
             # Stats section
             with Horizontal(id="stats-section"):
                 yield Static("✓ Success: 0", id="success-count", classes="stat")
                 yield Static("✗ Failed: 0", id="failure-count", classes="stat")
                 yield Static("⏳ Remaining: 0", id="remaining-count", classes="stat")
-            
+
             # Log of per-player results
             yield Label("Fetch Log:", id="log-label")
             yield RichLog(id="fetch-log", highlight=True, markup=True)
-            
+
             # Action buttons
             with Center():
                 yield Button(
-                    "Cancel", 
-                    id="cancel-btn", 
+                    "Cancel",
+                    id="cancel-btn",
                     variant="error"
                 )
                 yield Button(
-                    "Back to Search", 
-                    id="back-btn", 
+                    "Back to Search",
+                    id="back-btn",
                     variant="primary",
                     disabled=True
                 )
@@ -943,7 +1075,7 @@ class BatchFetchScreen(Screen):
 
         # Ensure logged in using async login (can't use asyncio.run inside running event loop)
         self._log_message("[yellow]🔐 Logging in...[/]")
-        
+
         try:
             login_success = await login_with_playwright(
                 scraper.username,
@@ -989,7 +1121,7 @@ class BatchFetchScreen(Screen):
                 # Fetch the player
                 if hasattr(scraper, 'run_external_profile'):
                     data = scraper.run_external_profile(user_id)
-                    
+
                     if data:
                         success_count += 1
                         self._log_message(
@@ -1065,7 +1197,7 @@ class BatchFetchScreen(Screen):
         """Update the progress bar."""
         progress_bar = self.query_one("#progress-bar", ProgressBar)
         progress_bar.advance(1)
-        
+
         status = self.query_one("#progress-status", Static)
         if current == "Complete":
             status.update(f"Complete - {completed} player(s) processed")
@@ -1077,7 +1209,7 @@ class BatchFetchScreen(Screen):
         success_label = self.query_one("#success-count", Static)
         failure_label = self.query_one("#failure-count", Static)
         remaining_label = self.query_one("#remaining-count", Static)
-        
+
         success_label.update(f"✓ Success: {success}")
         failure_label.update(f"✗ Failed: {failure}")
         remaining_label.update(f"⏳ Remaining: {remaining}")
@@ -1091,7 +1223,7 @@ class BatchFetchScreen(Screen):
         """Enable the back button and disable cancel."""
         cancel_btn = self.query_one("#cancel-btn", Button)
         back_btn = self.query_one("#back-btn", Button)
-        
+
         cancel_btn.disabled = True
         back_btn.disabled = False
 
@@ -1116,7 +1248,7 @@ class BatchFetchScreen(Screen):
 
         if event.state in [WorkerState.SUCCESS, WorkerState.ERROR, WorkerState.CANCELLED]:
             self._enable_back_button()
-            
+
             if event.state == WorkerState.ERROR:
                 error_msg = str(event.worker.error) if event.worker.error else "Unknown error"
                 self._log_message(f"[red]❌ Worker error: {error_msg}[/]")
@@ -1951,15 +2083,15 @@ class TableListScreen(Screen):
         with Vertical(id="menu-container"):
             yield Label("View Tables", id="menu-title")
             yield Static("Select a table to view", id="menu-status")
-            
+
             # Source legend
             with Horizontal(id="source-legend"):
                 yield Static("🟢 In-memory  🔵 On disk", id="source-legend-text")
-            
+
             # Table list will be populated dynamically
             with Center(id="table-list-container"):
                 yield Static("Loading tables...", id="table-list-status")
-            
+
             with Center():
                 yield Button("Back to Main Menu", id="back-btn", variant="primary")
         yield Footer()
@@ -1972,29 +2104,29 @@ class TableListScreen(Screen):
         """Populate the table list with available tables from all sources."""
         container = self.query_one("#table-list-container", Center)
         status = self.query_one("#table-list-status", Static)
-        
+
         # Get table provider from app
         provider = self.app.get_table_provider()
         table_infos = provider.discover(include_disk=True)
-        
+
         if not table_infos:
             status.update("[yellow]No tables available. Fetch data first.[/]")
             return
 
         # Clear existing content and show table buttons
         status.remove()
-        
+
         for info in table_infos:
             # Build button label with source indicator
             source_icon = "🟢" if info.source == TableSource.MEMORY else "🔵"
             row_count_str = f"{info.row_count} rows" if info.row_count >= 0 else "unknown rows"
             button_label = f"{source_icon} {info.display_name} ({row_count_str})"
-            
+
             # Store the internal name for lookup when button is pressed
             container.mount(
                 Button(
-                    button_label, 
-                    id=f"table-{info.name}", 
+                    button_label,
+                    id=f"table-{info.name}",
                     variant="primary" if info.source == TableSource.MEMORY else "default"
                 )
             )

@@ -1,3 +1,0 @@
-docs/how-to/contribute-docs.md
-zensical.toml
-docs/how-to/index.md

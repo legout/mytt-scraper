@@ -180,6 +180,7 @@ sessions/
 *.session
 active-planning.json
 .pi-artifacts/
+.subagent-runs/
 
 # =============================================================================
 # Rust artifacts (if any)

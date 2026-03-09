@@ -41,46 +41,122 @@ class PlayerSearcher(MyTischtennisScraper):
         return asyncio.run(self._search_via_playwright(query))
 
     def _search_via_api(self, query: str) -> List[Dict[str, Any]]:
-        """Try to search via API endpoints"""
-        search_endpoints = [
-            {
-                'url': f"{COMMUNITY_URL}?search={query}&show=everything&_data=routes%2F%24",
-                'name': 'Community search'
-            },
-        ]
-
-        for endpoint in search_endpoints:
-            print(f"Trying API: {endpoint['name']}")
-            try:
-                response = self.session.get(endpoint['url'])
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        # Look for players in response
-                        if isinstance(data, dict):
-                            # Check blockLoaderData
-                            if 'pageContent' in data:
-                                players = self._extract_players_from_page(data['pageContent'])
-                                if players:
-                                    print(f"✓ Found {len(players)} player(s) via API")
-                                    return players
-
-                        # Check other possible structures
-                        for key in ['players', 'results', 'items', 'searchResults']:
-                            if key in data and isinstance(data[key], list):
-                                print(f"✓ Found {len(data[key])} player(s) via API")
-                                return [self._parse_player_item(item) for item in data[key]]
-
-                    except Exception:
-                        # Try HTML parsing
-                        players = self._extract_players_from_html(response.text)
-                        if players:
-                            print(f"✓ Extracted {len(players)} player(s) from HTML")
-                            return players
-            except requests.RequestException:
-                continue
+        """Search for players using the mytischtennis.de search API.
+        
+        The actual search endpoint is:
+        POST https://www.mytischtennis.de/api/search/players
+        Body: query={search_term}&page=1&pagesize=4
+        
+        Returns player data with fields:
+        - lastname, firstname
+        - person_id
+        - external_id (this is the user-id for fetching profiles)
+        - internal_id
+        - licence_club
+        - club_name
+        """
+        search_url = f"{BASE_URL}/api/search/players"
+        
+        print(f"Searching API: {search_url}")
+        print(f"  Query: '{query}'")
+        
+        try:
+            # The API expects form-encoded data
+            data = {
+                'query': query,
+                'page': '1',
+                'pagesize': '20'  # Get more results
+            }
+            
+            response = self.session.post(search_url, data=data)
+            print(f"  Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    
+                    if 'results' in result and isinstance(result['results'], list):
+                        players = []
+                        for item in result['results']:
+                            player = self._parse_search_api_player(item)
+                            if player:
+                                players.append(player)
+                        
+                        print(f"✓ Found {len(players)} player(s) via search API")
+                        return players
+                    else:
+                        print(f"  No 'results' in response. Keys: {list(result.keys())}")
+                        
+                except Exception as e:
+                    print(f"  JSON parse error: {e}")
+                    print(f"  Response text: {response.text[:500]}")
+            else:
+                print(f"  Request failed: {response.status_code}")
+                print(f"  Response: {response.text[:500]}")
+                
+        except requests.RequestException as e:
+            print(f"  Request error: {e}")
 
         return []
+    
+    def _parse_search_api_player(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Parse a player item from the search API response.
+        
+        The search API returns:
+        {
+            "lastname": "Müller-Dietrich",
+            "firstname": "Birte",
+            "person_id": 314315,
+            "external_id": "e23825d6-d6b8-4186-b217-96b88e0a5d85",
+            "internal_id": "NU37332",
+            "licence_club": "SG 1947 Freiensteinau (24015)",
+            "dttb_player_id": null,
+            "club_name": "SG 1947 Freiensteinau"
+        }
+        """
+        if not isinstance(item, dict):
+            return None
+        
+        # Map the API fields to our standard format
+        player = {
+            'user_id': item.get('external_id'),  # This is the key for fetching profiles
+            'personId': str(item.get('person_id', '')),
+            'external_id': item.get('external_id'),
+            'internal_id': item.get('internal_id'),
+            'name': f"{item.get('firstname', '')} {item.get('lastname', '')}".strip(),
+            'firstname': item.get('firstname'),
+            'lastname': item.get('lastname'),
+            'club': item.get('club_name') or item.get('licence_club'),
+            'clubNr': None,  # Will be extracted from licence_club if needed
+            'ttr': None,  # Search API doesn't return TTR
+            'source': 'search_api'
+        }
+        
+        # Only return if we have the essential user_id
+        if player['user_id']:
+            return player
+        
+        return None
+
+    def _extract_players_from_block_loader(self, block_loader: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract players from blockLoaderData structure."""
+        players = []
+        
+        for block_id, block_data in block_loader.items():
+            if not isinstance(block_data, dict):
+                continue
+                
+            # Look for various player list keys
+            player_keys = ['players', 'searchResults', 'results', 'opponents', 'members', 'items']
+            
+            for key in player_keys:
+                if key in block_data and isinstance(block_data[key], list):
+                    for item in block_data[key]:
+                        player = self._parse_player_item(item)
+                        if player:
+                            players.append(player)
+        
+        return players
 
     def _extract_players_from_page(self, page_content: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract player info from pageContent structure"""
@@ -160,9 +236,17 @@ class PlayerSearcher(MyTischtennisScraper):
         return players
 
     async def _search_via_playwright(self, query: str) -> List[Dict[str, Any]]:
-        """Use Playwright to interact with search UI"""
+        """Use Playwright to search via the API.
+        
+        Since we now know the correct API endpoint, we use Playwright
+        to ensure we have a valid authenticated session, then call the API.
+        """
         print("Using Playwright for search...")
-
+        
+        # Actually, since we now have the correct API endpoint,
+        # we'll just use the API method which is faster and more reliable.
+        # But we'll do a quick browser check to ensure session is valid.
+        
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=self.headless)
             context = await browser.new_context(
@@ -171,47 +255,35 @@ class PlayerSearcher(MyTischtennisScraper):
                 locale='de-DE',
             )
 
-            # Use existing cookies
+            # Transfer cookies from our session to browser
             cookies = [{'name': c.name, 'value': c.value, 'domain': '.mytischtennis.de'} for c in self.session.cookies]
             await context.add_cookies(cookies)
 
             page = await context.new_page()
 
             try:
-                await page.goto(f"{BASE_URL}/community", wait_until='networkidle')
-
-                # Look for search input
-                search_input = None
-
-                for selector in SEARCH_INPUT_SELECTORS:
-                    try:
-                        element = page.locator(selector).first
-                        if await element.is_visible(timeout=2000):
-                            search_input = element
-                            print(f"✓ Found search input: {selector}")
-                            break
-                    except:
-                        continue
-
-                if search_input:
-                    await search_input.fill(query)
-                    await asyncio.sleep(1)
-                    await page.keyboard.press('Enter')
-                    await page.wait_for_load_state('networkidle', timeout=5000)
-
-                    html = await page.content()
-                    players = self._extract_players_from_html(html)
-
+                # Navigate to community page to verify session is valid
+                print(f"Verifying session...")
+                await page.goto(f"{BASE_URL}/community", wait_until='domcontentloaded')
+                await asyncio.sleep(2)
+                
+                # If we're redirected to login, session expired
+                if '/login' in page.url:
+                    print("⚠ Session expired, need to re-login")
                     await browser.close()
-                    print(f"✓ Found {len(players)} player(s) via Playwright")
-                    return players
+                    return []
+                
+                print("✓ Session is valid")
+                await browser.close()
+                
+                # Now use the API method which is more reliable
+                return self._search_via_api(query)
 
             except Exception as e:
-                print(f"Error during Playwright search: {e}")
+                print(f"Error during Playwright session check: {e}")
                 await browser.close()
-                return []
-
-        return []
+                # Fall back to API method anyway
+                return self._search_via_api(query)
 
     def _display_search_results(self, results: List[Dict[str, Any]], query: str) -> None:
         """Display search results"""

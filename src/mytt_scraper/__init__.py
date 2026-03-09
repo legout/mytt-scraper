@@ -10,6 +10,7 @@ from .config import (
     EXTERNAL_PROFILE_ENDPOINT,
     LOGIN_URL,
     OWN_PROFILE_ENDPOINT,
+    SEARCH_ENDPOINT,
     TABLES_DIR_NAME,
 )
 from .player_search import PlayerSearcher
@@ -26,6 +27,7 @@ __all__ = [
     "LOGIN_URL",
     "OWN_PROFILE_ENDPOINT",
     "EXTERNAL_PROFILE_ENDPOINT",
+    "SEARCH_ENDPOINT",
     "API_HEADERS",
     "TABLES_DIR_NAME",
     "extract_flat_tables",

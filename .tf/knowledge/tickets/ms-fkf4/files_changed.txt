@@ -1,4 +1,0 @@
-src/mytt_scraper/utils/table_provider.py
-src/mytt_scraper/utils/__init__.py
-src/mytt_scraper/tui/app.py
-src/mytt_scraper/tui/screens.py

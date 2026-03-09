@@ -1,1 +1,0 @@
-src/mytt_scraper/utils/table_extractor.py

@@ -1,5 +1,0 @@
-pyproject.toml
-src/mytt_scraper/tui/__init__.py
-src/mytt_scraper/tui/__main__.py
-src/mytt_scraper/tui/screens.py
-src/mytt_scraper/tui/app.py

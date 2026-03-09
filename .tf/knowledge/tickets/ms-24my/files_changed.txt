@@ -1,2 +1,0 @@
-docs/TUI_TABLE_VIEWER.md
-README.md

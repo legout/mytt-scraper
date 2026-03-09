@@ -1,2 +1,0 @@
-src/mytt_scraper/scraper.py
-src/mytt_scraper/__init__.py

@@ -8,6 +8,7 @@ COMMUNITY_URL = f"{BASE_URL}/community"
 # API Endpoints
 OWN_PROFILE_ENDPOINT = f"{COMMUNITY_URL}?show=everything&_data=routes%2F%24"
 EXTERNAL_PROFILE_ENDPOINT = f"{COMMUNITY_URL}/external-profile?user-id={{user_id}}&show=everything&_data=routes%2F%24"
+SEARCH_ENDPOINT = f"{BASE_URL}/search?query={{query}}&_data=routes%2F%24"
 
 # Headers for API requests
 API_HEADERS = {
